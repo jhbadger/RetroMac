@@ -1,12 +1,11 @@
-/* MiscManagers.c -- the smaller Toolbox pieces that Phase 0 only
- * needs to satisfy the boot sequence (Fonts/TextEdit/Dialogs) or that
- * have no Cocoa dependency at all (Memory Manager: modern macOS has a
- * flat, non-relocating 64-bit heap, so Handles are just a pointer to
- * a pointer to a malloc'd, size-prefixed block).
+/* MiscManagers.c -- the smaller Toolbox pieces that only need to
+ * satisfy the boot sequence (Fonts) or that have no Cocoa dependency
+ * at all (Memory Manager: modern macOS has a flat, non-relocating
+ * 64-bit heap, so Handles are just a pointer to a pointer to a
+ * malloc'd, size-prefixed block). TEInit/InitDialogs moved to
+ * TextEditManager.c/DialogManager.c once those became real (Phase 1).
  */
 #include "../include/Fonts.h"
-#include "../include/TextEdit.h"
-#include "../include/Dialogs.h"
 #include "../include/Memory.h"
 #include <stdlib.h>
 #include <string.h>
@@ -15,18 +14,6 @@ void InitFonts(void)
 {
     /* Real font/glyph metrics come from Core Text lazily, per draw
      * call (see QuickDraw.c) -- nothing to preload here yet. */
-}
-
-void TEInit(void)
-{
-    /* Full TextEdit (TENew/TEKey/TEClick/...) is Phase 1. */
-}
-
-void InitDialogs(void *resumeProc)
-{
-    (void)resumeProc;
-    /* Phase 0 apps build their dialogs as plain dBoxProc windows
-     * (see WindowManager.c) rather than via GetNewDialog/DITL. */
 }
 
 typedef struct RMHandleHeader {

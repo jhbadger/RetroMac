@@ -1,15 +1,17 @@
 # RetroMac Toolbox — a Classic Mac Toolbox shim for modern macOS
 
-> **Status: Phase 0 is done and verified.** `wordle.c` and `demo.c`
-> both build with `retromacc` and run as real, interactive `.app`
-> bundles — windows, colored/text drawing, keyboard input, the real
-> system menu bar, and the programmatic About dialog all confirmed
-> working by launching the built apps and driving them with actual
-> clicks/keystrokes, not just a clean compile. The component map in
-> §3 and the build-wrapper description in §6 describe what was
-> actually built (which diverged from the original plan in a few
-> places); see §10 for what changed, what broke during bring-up, and
-> what's still just verified by inspection rather than by screenshot.
+> **Status: Phase 0 and Phase 1 are done and verified.** `wordle.c` and
+> `demo.c` both build with `retromacc` and run as real, interactive
+> `.app` bundles — windows, colored/text drawing, keyboard input, the
+> real system menu bar, and the programmatic About dialog all
+> confirmed working by launching the built apps and driving them with
+> actual clicks/keystrokes, not just a clean compile. Phase 1 adds a
+> real Dialog Manager (`NewDialog`/`ModalDialog`/`Alert` family) and
+> TextEdit (`TENew`/`TEClick`/`TEKey`); `dialogdemo.c` is its
+> acceptance test, confirmed the same way. The component map in §3 and
+> the build-wrapper description in §6 describe what was actually built
+> (which diverged from the original plan in a few places); see §10 for
+> Phase 0's bring-up notes and §11 for Phase 1's.
 
 ## 1. Goal
 
@@ -95,10 +97,18 @@ RetroMac/
 │   │                             (push buttons only; pure C, no Cocoa needed)
 │   ├── EventManager.c            WaitNextEvent/FlushEvents/GlobalToLocal/
 │   │                             SystemClick/TickCount
-│   ├── MiscManagers.c            InitFonts/TEInit/InitDialogs stubs (dialog_manager.c/
-│   │                             te_manager.c/font_manager.c folded in here, since
-│   │                             each is a couple of lines) + the Memory Manager
-│   │                             (NewHandle/NewPtr/HLock/... -- malloc wrappers)
+│   ├── MiscManagers.c            InitFonts stub + the Memory Manager (NewHandle/
+│   │                             NewPtr/HLock/... -- malloc wrappers). TEInit/
+│   │                             InitDialogs moved out once TextEditManager.c/
+│   │                             DialogManager.c made them real (Phase 1)
+│   ├── TextEditManager.c         Phase 1: TENew/TEClick/TEKey/TEIdle/... -- one
+│   │                             unwrapped editable line per field, drawn with Core
+│   │                             Text for both rendering and hit-testing, embedded
+│   │                             in each window's teFields[] pool
+│   ├── DialogManager.c           Phase 1: NewDialog/ModalDialog/ParamText/Alert
+│   │                             family -- DialogPtr is just WindowPtr (Types.h);
+│   │                             GetNewDialog is a documented stub (no Resource
+│   │                             Manager until Phase 2)
 │   ├── CocoaBridge.m             the ONLY Objective-C / AppKit-importing file --
 │   │                             not in the original plan; see §10. Owns RMWindow/
 │   │                             RMContentView, NSMenu construction, NSApplication
@@ -146,6 +156,20 @@ Everything in this table gets a real implementation before Phase 0
 is "done." Anything a future test program calls that isn't in this
 table returns a documented stub (compiles, logs to stderr once,
 no-ops) rather than a link error — see §7.
+
+### 4a. API surface added for Phase 1 (`dialogdemo.c`)
+
+| Category | Functions |
+|---|---|
+| Dialog Manager | `NewDialog`, `ModalDialog`, `ParamText`, `Alert`, `StopAlert`, `NoteAlert`, `CautionAlert` |
+| TextEdit | `TENew`, `TEDispose`, `TESetText`, `TEGetText`, `TEClick`, `TEKey`, `TEIdle`, `TEActivate`, `TEDeactivate`, `TEUpdate`, `TESetSelect`, `TECalText` |
+| Types | `DialogPtr` (== `WindowPtr`), `TEHandle` |
+
+`GetNewDialog` is declared but is a documented stub (§7) — there's no
+Resource Manager yet to look up a dialog ID's DLOG/DITL against
+(Phase 2). See §11 for what `NewDialog`/`ModalDialog`/TextEdit
+actually diverge from real Inside Macintosh behavior to work without
+one.
 
 ## 5. Coordinate system & rendering pipeline
 
@@ -220,15 +244,20 @@ an unsigned Mach-O simply won't launch there.
 Toolbox calls outside the Phase 0 table (§4) that later test
 programs need — e.g. `GetNewWindow`, `ParamText`, `Alert`,
 `TESetText` — should be added incrementally, in the same
-implementation style, rather than stubbed indefinitely.
+implementation style, rather than stubbed indefinitely. Phase 1 did
+exactly this for `ParamText`/`Alert`/`TESetText` (now real, §4a);
+`GetNewDialog` is the one Phase 1 symbol that stayed a real stub,
+since it fundamentally needs the Resource Manager (Phase 2), not just
+more implementation effort.
 
 The planned `RETROMAC_STUB(name)` weak-symbol macro (auto-stubbing
 any undeclared call with a stderr warning) was **not** built for
 Phase 0 — it wasn't needed, since `wordle.c`/`demo.c` only ever call
 things already in the §4 table, and a real link error for a missing
 symbol is arguably a clearer signal during bring-up than a silently
-no-op'd trap anyway. Revisit this if/when Phase 1 samples start
-needing a wider surface incrementally.
+no-op'd trap anyway. Still not needed as of Phase 1 — `dialogdemo.c`
+only calls things in §4/§4a, plus the one explicit `GetNewDialog`
+stub above.
 
 ## 8. Phased roadmap
 
@@ -237,11 +266,17 @@ needing a wider surface incrementally.
   gray cell coloring, the About dialog, and menu commands all
   verified working by launching the built apps and driving them with
   real clicks/keystrokes. See §10 for the bring-up notes.
-- **Phase 1** — Dialog Manager proper (`GetNewDialog`, `ModalDialog`,
-  `DITL`-less programmatic dialogs already covered by Phase 0's
-  `dBoxProc`-style windows), `Alert`/`StopAlert`, `TextEdit` editable
-  fields (`TENew`, `TEClick`, `TEKey`) for apps with text input.
-  Static Rez-based resources (`GetNewWindow(id, ...)`) 
+- **Phase 1 — done.** The table in §4a. Dialog Manager (`NewDialog`,
+  `ModalDialog`, DITL-less — items are `NewControl`/`TENew` calls on
+  the dialog in creation order rather than a DITL resource),
+  `Alert`/`StopAlert`/`NoteAlert`/`CautionAlert`, and `TextEdit`
+  editable fields (`TENew`, `TEClick`, `TEKey`, caret blink via
+  `TEIdle`). `dialogdemo.c` compiles with `retromacc` and was verified
+  working by launching the built app and driving it with real clicks/
+  keystrokes: typing/backspacing/arrow-key-navigating a text field,
+  click-to-reposition the caret, OK vs. Cancel, Return-triggers-
+  default-item, and the `NoteAlert` icon/message. `GetNewDialog`
+  (resource-ID based) is a documented stub — see §4a/§11.
 - **Phase 2** — Resource Manager subset: parse `.rsrc`/Rez-compiled
   data so `demo.r`-style resource-driven apps (not just
   programmatic ones) can load `WIND`/`MENU`/`DITL`/`ALRT` resources
@@ -266,6 +301,13 @@ needing a wider surface incrementally.
   as the acceptance test for whatever new Toolbox surface it
   introduces, extending §4's table rather than writing synthetic
   unit tests against Toolbox internals in isolation.
+- `dialogdemo.c` is the Phase 1 acceptance test, per that same
+  convention: build with `retromacc`, launch, and manually verify a
+  text-entry dialog (typing, backspace, left/right arrow-key caret
+  movement, click-to-reposition the caret, OK vs. Cancel round-
+  tripping the text via `TESetText`/`TEGetText`), Return triggering
+  the default item, and a `NoteAlert` built from `ParamText`.
+  **Done for Phase 1** — see §11.
 
 ## 10. Phase 0 bring-up notes
 
@@ -353,3 +395,37 @@ just idles harmlessly instead of pegging a core.
   instances with `NSWindowStyleMaskBorderless` don't expose the same
   `AXWindow` surface a titled window would). Worth a manual click-test
   pass before relying on it.
+
+## 11. Phase 1 bring-up notes
+
+Two assumptions from the Phase 1 plan held up cleanly, and one testing
+technique is worth recording for later phases.
+
+**Arrow keys needed zero `EventRecord`/bridge plumbing.** The plan
+worried that `TEKey`-driven caret navigation would need `keyCodeMask`
+(currently always 0 — `RMCocoa_WaitNextEvent` never populates it)
+threaded through from `CocoaBridge.m`. It doesn't: real classic
+TextEdit already receives arrow keys as ordinary charCodes `0x1C`-`0x1F`
+(left/right/up/down) in the *low* byte, the same byte
+`wordle.c`/`demo.c` already mask out with `charCodeMask`. So the only
+change needed was four more `unichar` special cases (alongside the
+existing Delete→8 mapping) in `CocoaBridge.m`'s keyDown handling —
+`TEKey` itself needed no new plumbing to see them.
+
+**Item numbering by creation order (no DITL) needed no new API
+surface.** `ModalDialog`'s `itemHit` comes from `nextItemNumber`,
+incremented on the dialog by both `NewControl` and `TENew` at creation
+time (`RetroMacInternal.h`). Apps just create their OK button before
+their Cancel button, exactly like Phase 0's About boxes already did by
+convention — no "register item N" call had to be invented.
+
+**AppleScript UI-scripting's window-content limitation from §10 is
+still real, but `cliclick` (raw `CGEvent` clicks by screen coordinate,
+independent of the accessibility tree) works around it.** Menu bar
+commands were driven via `System Events`' real `NSMenu` accessibility
+tree as before; clicking *inside* a dialog's content area (the text
+field, OK/Cancel buttons) needed `cliclick c:<x>,<y>` at the window's
+known screen position instead, since RetroMac's borderless windows
+still don't expose an `AXWindow` surface. Worth reaching for `cliclick`
+first, rather than fighting accessibility APIs, for any future
+interactive verification of window content.

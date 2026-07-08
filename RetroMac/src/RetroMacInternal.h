@@ -23,6 +23,7 @@ extern "C" {
 #define RM_MAX_MENUS       16
 #define RM_MAX_MENU_ITEMS  32
 #define RM_MAX_CONTROLS    16
+#define RM_MAX_TE_FIELDS   4
 /* RM_TITLEBAR_HEIGHT / RM_MENUBAR_HEIGHT come from RetroMacBridge.h */
 
 /* ---- Controls ------------------------------------------------------ */
@@ -36,6 +37,27 @@ struct ControlRecord {
     Boolean   visible;
     Boolean   hilited;     /* true while pressed/tracking   */
     short     procID;
+    short     itemNumber;  /* dialog item number -- see TERec's itemNumber */
+};
+
+/* ---- TextEdit --------------------------------------------------------
+ * No DITL/resource-based item numbering exists (Phase 2 work), so both
+ * ControlRecord and TERec are assigned itemNumber from the owning
+ * window's nextItemNumber counter at creation time, in whatever order
+ * the app calls NewControl/TENew -- ModalDialog's itemHit reads this
+ * back directly instead of consulting a DITL item list. */
+
+struct TERec {
+    Boolean   inUse;
+    WindowPtr owner;
+    Rect      viewRect;    /* local to owner window's content area */
+    char     *text;        /* heap buffer, grows via realloc; NUL-terminated */
+    short     length;
+    short     selStart, selEnd; /* selStart == selEnd => caret, no selection */
+    Boolean   active;
+    Boolean   caretVisible;
+    unsigned long lastBlinkTick;
+    short     itemNumber;
 };
 
 /* ---- Windows --------------------------------------------------------
@@ -62,7 +84,10 @@ struct GrafPort {
     RGBColor   fgColor, bgColor;
     short      txFont, txSize, txFace;
 
+    short      nextItemNumber; /* next dialog item number to assign (see TERec) */
+
     struct ControlRecord controls[RM_MAX_CONTROLS];
+    struct TERec teFields[RM_MAX_TE_FIELDS];
 };
 
 extern struct GrafPort gWindows[RM_MAX_WINDOWS];
@@ -75,6 +100,10 @@ void RM_BringToFront(WindowPtr w);     /* stack-to-front + orderFront on screen 
 void RM_RemoveFromStack(WindowPtr w);
 void RM_SyncContentOriginFromFrame(WindowPtr w); /* re-derive contentOriginGlobal after a drag */
 CGContextRef RM_CurrentBuffer(void); /* buffer for gCurrentPort, or NULL */
+
+/* Implemented in TextEditManager.c; used by DialogManager.c's
+ * ModalDialog to route a mouseDown to whichever TE field it landed in. */
+TEHandle RM_FindTEField(WindowPtr owner, Point localPt);
 
 /* ---- Menus ----------------------------------------------------------- */
 

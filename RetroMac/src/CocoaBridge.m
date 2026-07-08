@@ -344,8 +344,16 @@ int RMCocoa_WaitNextEvent(unsigned long timeoutTicks, short *outWhat, long *outM
             unichar ch = chars.length > 0 ? [chars characterAtIndex:0] : 0;
             /* Cocoa reports Return as CR (13) already; map Delete (0x7F)
              * back to the classic backspace code (8) that these apps
-             * check for. */
+             * check for. Real classic TextEdit/Toolbox apps already
+             * receive arrow keys as charCodes 0x1C-0x1F (left/right/
+             * up/down) rather than via keyCodeMask, so map Cocoa's
+             * arrow-key function-key unichars to those same codes
+             * instead of plumbing keyCode through EventRecord. */
             if (ch == 0x7F) ch = 8;
+            else if (ch == NSLeftArrowFunctionKey)  ch = 0x1C;
+            else if (ch == NSRightArrowFunctionKey) ch = 0x1D;
+            else if (ch == NSUpArrowFunctionKey)    ch = 0x1E;
+            else if (ch == NSDownArrowFunctionKey)  ch = 0x1F;
             if (outWhat) *outWhat = 3 /* keyDown */;
             if (outMessage) *outMessage = (long)(unsigned char)ch;
             if (outWhere) *outWhere = ClassicPointFromScreenPoint([NSEvent mouseLocation]);

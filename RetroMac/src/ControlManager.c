@@ -91,6 +91,7 @@ ControlHandle NewControl(WindowPtr owner, const Rect *boundsRect, ConstStr255Par
     c->visible = visible ? true : false;
     c->hilited = false;
     c->procID = procID;
+    c->itemNumber = ++owner->nextItemNumber;
 
     if (c->visible) RM_DrawControl(c);
     return c;

@@ -53,6 +53,8 @@ RUNTIME_SOURCES=(
     "$RETROMAC_ROOT/src/ControlManager.c"
     "$RETROMAC_ROOT/src/EventManager.c"
     "$RETROMAC_ROOT/src/MiscManagers.c"
+    "$RETROMAC_ROOT/src/TextEditManager.c"
+    "$RETROMAC_ROOT/src/DialogManager.c"
     "$RETROMAC_ROOT/src/CocoaBridge.m"
     "$RETROMAC_ROOT/src/AppShell.m"
 )

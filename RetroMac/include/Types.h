@@ -48,6 +48,9 @@ typedef MenuRecord       *MenuHandle;
 typedef struct ControlRecord ControlRecord;
 typedef ControlRecord    *ControlHandle;
 
+typedef struct TERec TERec;
+typedef TERec            *TEHandle;
+
 #define HiWord(x) ((short)(((unsigned long)(x) >> 16) & 0xFFFFU))
 #define LoWord(x) ((short)((unsigned long)(x) & 0xFFFFU))
 
