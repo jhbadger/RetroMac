@@ -1,0 +1,167 @@
+/* MenuManager.c -- classic Menu Manager backed by a real NSMenu bar
+ * (built via CocoaBridge.m). Plain C: owns the menu pool and all
+ * AppendMenu item-spec parsing (separators via "-", initial-disabled
+ * via a leading "(", Cmd-key equivalents via a trailing "/X" --
+ * exactly the conventions Inside Macintosh documents for AppendMenu).
+ *
+ * Clicking the real system menu bar is intercepted by CocoaBridge.m's
+ * WaitNextEvent, which lets AppKit's own (blocking) menu-tracking run
+ * via -sendEvent: -- by the time that call returns, RM_MenuItemChosen
+ * below has already populated gPendingMenuSelection, and the point
+ * that was clicked lands in the classic menu-bar strip, so FindWindow
+ * naturally reports inMenuBar and the classic app's own MenuSelect
+ * call (right where it already expects to) just needs to read that
+ * pending value back out.
+ */
+#include "RetroMacInternal.h"
+#include "../include/Menus.h"
+#include <string.h>
+#include <stdio.h>
+
+struct MenuRecord gMenus[RM_MAX_MENUS];
+volatile long gPendingMenuSelection = 0;
+
+static struct MenuRecord *RM_AllocMenuSlot(void)
+{
+    for (int i = 0; i < RM_MAX_MENUS; i++) {
+        if (!gMenus[i].inUse) {
+            memset(&gMenus[i], 0, sizeof(gMenus[i]));
+            gMenus[i].inUse = true;
+            return &gMenus[i];
+        }
+    }
+    fprintf(stderr, "RetroMac: out of menu slots (RM_MAX_MENUS=%d)\n", RM_MAX_MENUS);
+    return NULL;
+}
+
+static void RM_ParseMenuItemSpec(ConstStr255Param pstr, RMMenuItem *item)
+{
+    short len = RM_PStringLength(pstr);
+    short i, textLen = 0;
+    Boolean disabled = false;
+    char cmdKey = 0;
+    unsigned char text[256];
+
+    memset(item, 0, sizeof(*item));
+
+    if (len == 1 && pstr[1] == '-') {
+        item->isSeparator = true;
+        return;
+    }
+
+    i = 0;
+    if (len > 0 && pstr[1] == '(') { disabled = true; i = 1; }
+
+    for (; i < len; i++) {
+        unsigned char c = pstr[1 + i];
+        if (c == '/' && i + 1 < len) {
+            cmdKey = (char)pstr[1 + i + 1];
+            break;
+        }
+        text[textLen++] = c;
+    }
+
+    item->enabled = disabled ? false : true;
+    item->cmdKey = cmdKey;
+    item->title[0] = (unsigned char)textLen;
+    memcpy(&item->title[1], text, (size_t)textLen);
+}
+
+void InitMenus(void)
+{
+    memset(gMenus, 0, sizeof(gMenus));
+    gPendingMenuSelection = 0;
+}
+
+MenuHandle NewMenu(short menuID, ConstStr255Param title)
+{
+    MenuHandle m = RM_AllocMenuSlot();
+    if (!m) return NULL;
+
+    m->menuID = menuID;
+    RM_PStringCopy(m->title, title);
+    m->itemCount = 0;
+
+    /* Byte 0x14 as a menu's entire title is not a printable Mac Roman
+     * character -- it is the long-standing Toolbox sentinel for "this
+     * is the Apple menu, draw the Apple logo here." */
+    m->isAppleMenu = (RM_PStringLength(title) == 1 && title[1] == 0x14) ? true : false;
+
+    char utf8Title[256];
+    if (m->isAppleMenu) utf8Title[0] = '\0';
+    else RM_MacRomanPStringToUTF8(title, utf8Title, sizeof(utf8Title));
+
+    m->nsMenu = RMCocoa_CreateMenu(utf8Title, m->isAppleMenu ? 1 : 0);
+    return m;
+}
+
+void AppendMenu(MenuHandle m, ConstStr255Param data)
+{
+    if (!m || m->itemCount >= RM_MAX_MENU_ITEMS) return;
+
+    RMMenuItem *item = &m->items[m->itemCount];
+    RM_ParseMenuItemSpec(data, item);
+    short itemIndex1Based = (short)(m->itemCount + 1);
+    m->itemCount++;
+
+    if (item->isSeparator) {
+        RMCocoa_AppendMenuItem(m->nsMenu, "", 0, 1, 0, m->menuID, itemIndex1Based);
+    } else {
+        char utf8[1024];
+        RM_MacRomanPStringToUTF8(item->title, utf8, sizeof(utf8));
+        RMCocoa_AppendMenuItem(m->nsMenu, utf8, item->cmdKey, 0, item->enabled ? 1 : 0,
+                                m->menuID, itemIndex1Based);
+    }
+}
+
+void InsertMenu(MenuHandle m, short beforeID)
+{
+    (void)beforeID; /* phase 0: both sample apps always insert at the end */
+    if (!m) return;
+    RMCocoa_InsertMenuIntoBar(m->nsMenu);
+}
+
+void DrawMenuBar(void)
+{
+    RMCocoa_RebuildMenuBar();
+}
+
+long MenuSelect(Point startPt)
+{
+    (void)startPt;
+    long sel = gPendingMenuSelection;
+    gPendingMenuSelection = 0;
+    return sel;
+}
+
+long MenuKey(short ch)
+{
+    char target = (char)ch;
+    if (target >= 'a' && target <= 'z') target = (char)(target - 32); /* Cmd-key equivalents are stored uppercase */
+
+    for (int i = 0; i < RM_MAX_MENUS; i++) {
+        if (!gMenus[i].inUse) continue;
+        for (int j = 0; j < gMenus[i].itemCount; j++) {
+            RMMenuItem *item = &gMenus[i].items[j];
+            if (!item->isSeparator && item->enabled && item->cmdKey == target) {
+                return ((long)gMenus[i].menuID << 16) | (long)(j + 1);
+            }
+        }
+    }
+    return 0;
+}
+
+void HiliteMenu(short menuID)
+{
+    (void)menuID; /* AppKit already highlighted the chosen title during its own tracking */
+}
+
+void RM_MenuItemChosen(short menuID, short itemIndex1Based)
+{
+    gPendingMenuSelection = ((long)menuID << 16) | (long)itemIndex1Based;
+}
+
+int RM_HasPendingMenuSelection(void)
+{
+    return gPendingMenuSelection != 0;
+}
