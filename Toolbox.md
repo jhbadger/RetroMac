@@ -1,5 +1,16 @@
 # RetroMac Toolbox — a Classic Mac Toolbox shim for modern macOS
 
+> **Status: Phase 0 is done and verified.** `wordle.c` and `demo.c`
+> both build with `retromacc` and run as real, interactive `.app`
+> bundles — windows, colored/text drawing, keyboard input, the real
+> system menu bar, and the programmatic About dialog all confirmed
+> working by launching the built apps and driving them with actual
+> clicks/keystrokes, not just a clean compile. The component map in
+> §3 and the build-wrapper description in §6 describe what was
+> actually built (which diverged from the original plan in a few
+> places); see §10 for what changed, what broke during bring-up, and
+> what's still just verified by inspection rather than by screenshot.
+
 ## 1. Goal
 
 Let unmodified (or nearly unmodified) classic Mac OS C sources —
@@ -56,52 +67,61 @@ return the same `(menuID, item)` packed `long` either way.
 
 ```
 RetroMac/
-├── include/                     (drop-in classic headers)
-│   ├── Types.h
-│   ├── Quickdraw.h
-│   ├── Fonts.h
-│   ├── Windows.h
-│   ├── Menus.h
-│   ├── TextEdit.h
-│   ├── Dialogs.h
-│   ├── Events.h
-│   ├── Memory.h
-│   ├── Controls.h
-│   └── OSUtils.h                (TickCount, HiWord/LoWord)
+├── include/                     (drop-in classic headers, unchanged from plan)
+│   ├── Types.h                  Boolean/Point/Rect/etc reused from the SDK's own
+│   │                            MacTypes.h; only RGBColor + opaque WindowPtr/
+│   │                            MenuHandle/ControlHandle are added on top
+│   ├── Quickdraw.h, Fonts.h, Windows.h, Menus.h, TextEdit.h,
+│   │   Dialogs.h, Events.h, Memory.h, Controls.h, OSUtils.h
 ├── src/
-│   ├── qd_types.c/h              Rect/Point/RGBColor helpers, SetRect/InsetRect
-│   ├── qd_port.c/h                GrafPort/CGrafPort + per-window ARGB8888 buffer
-│   ├── qd_draw.c                  EraseRect/FrameRect/FrameRoundRect/PenSize/PenNormal
-│   ├── qd_text.c                  TextFont/TextSize/TextFace/DrawString/DrawChar/
-│   │                              StringWidth/GetFontInfo (via Core Text)
-│   ├── qd_color.c                 RGBForeColor/RGBBackColor (RGBColor -> CGColor)
-│   ├── win_manager.c              NewWindow/DisposeWindow/ShowWindow/SetPort/
-│   │                              FrontWindow/SelectWindow/DragWindow/FindWindow
-│   ├── menu_manager.c             NewMenu/AppendMenu/InsertMenu/DrawMenuBar/
-│   │                              MenuSelect/MenuKey/HiliteMenu (backed by NSMenu)
-│   ├── control_manager.c          NewControl/DisposeControl/FindControl/TrackControl
-│   ├── dialog_manager.c           InitDialogs (stub), programmatic dBoxProc windows
-│   ├── event_manager.c            WaitNextEvent/FlushEvents/GlobalToLocal/
-│   │                              EventRecord translation from NSEvent
-│   ├── memory_manager.c           NewHandle/NewPtr/HLock/HUnlock/DisposeHandle
-│   │                              (thin malloc wrappers — flat 64-bit memory model)
-│   ├── te_manager.c                TEInit (stub; full TextEdit is Phase 2)
-│   ├── font_manager.c              InitFonts (loads a bundled bitmap-ish system font)
-│   ├── pascal_string.c/h           c2pstr/p2cstr, Str255 helpers
-│   └── app_shell.m                 NSApplication bootstrap, run loop pump, main()
-│                                    trampoline that calls the user's classic main()
+│   ├── RetroMacBridge.h          the ONLY header shared with CocoaBridge.m -- see
+│   │                             §10 for why a hard C/Objective-C split was needed
+│   ├── RetroMacInternal.h        private GrafPort/MenuRecord/ControlRecord structs
+│   │                             + the window/menu pools, included by every plain-C
+│   │                             file below (never by CocoaBridge.m)
+│   ├── QuickDraw.c               geometry, drawing, text (Core Text), color --
+│   │                             everything qd_types/qd_port/qd_draw/qd_text/
+│   │                             qd_color would have been, consolidated
+│   ├── MacRoman.c                Mac Roman -> UTF-8 (Pascal string helpers live
+│   │                             here too, replacing the planned pascal_string.c)
+│   ├── WindowManager.c           NewWindow/DisposeWindow/SetPort/FrontWindow/
+│   │                             SelectWindow/DragWindow/FindWindow/BeginUpdate/
+│   │                             EndUpdate/TrackGoAway -- pure C, calls CocoaBridge
+│   │                             for the actual NSWindow/NSView work
+│   ├── MenuManager.c             NewMenu/AppendMenu/InsertMenu/DrawMenuBar/
+│   │                             MenuSelect/MenuKey/HiliteMenu (backed by NSMenu
+│   │                             via CocoaBridge)
+│   ├── ControlManager.c          NewControl/DisposeControl/FindControl/TrackControl
+│   │                             (push buttons only; pure C, no Cocoa needed)
+│   ├── EventManager.c            WaitNextEvent/FlushEvents/GlobalToLocal/
+│   │                             SystemClick/TickCount
+│   ├── MiscManagers.c            InitFonts/TEInit/InitDialogs stubs (dialog_manager.c/
+│   │                             te_manager.c/font_manager.c folded in here, since
+│   │                             each is a couple of lines) + the Memory Manager
+│   │                             (NewHandle/NewPtr/HLock/... -- malloc wrappers)
+│   ├── CocoaBridge.m             the ONLY Objective-C / AppKit-importing file --
+│   │                             not in the original plan; see §10. Owns RMWindow/
+│   │                             RMContentView, NSMenu construction, NSApplication
+│   │                             bootstrap, and the WaitNextEvent/mouse-tracking
+│   │                             pump, all behind RetroMacBridge.h's primitive-only
+│   │                             signatures
+│   └── AppShell.m                thin now: just the real main(), boots Cocoa via
+│                                  CocoaBridge then calls RetroMacUserMain()
 ├── tools/
-│   └── retromacc                   build-wrapper shell script (see §6)
-└── Toolbox.md                      this document
+│   ├── retromacc                 build-wrapper shell script (see §6)
+│   └── pstr_rewrite.py           the "\p" literal rewrite pass (a real small
+│                                  Python tokenizer, not a sed/regex one-liner --
+│                                  see §6)
+└── Toolbox.md                    this document
 ```
 
-`app_shell.m` is the only Objective-C file; everything else is
+`CocoaBridge.m` is the only Objective-C file — everything else is
 plain C so classic sources compile against it unchanged. It supplies
-the process's *real* `main()`, sets up `NSApplication`, creates an
-`NSWindow`/`NSView` per `WindowPtr`, and pumps the Cocoa run loop
-from inside `WaitNextEvent` — the classic app's `main()` (in
-`wordle.c`) is renamed at build time (see §6) and invoked once
-Cocoa is ready.
+the process's *real* `main()` (via `AppShell.m`), sets up
+`NSApplication`, creates an `NSWindow`/`NSView` per `WindowPtr`, and
+pumps the Cocoa run loop from inside `WaitNextEvent` — the classic
+app's `main()` (in `wordle.c`) is renamed at build time (see §6) and
+invoked once Cocoa is ready.
 
 ## 4. API surface required for Phase 0 (`wordle.c` + `demo.c`)
 
@@ -129,18 +149,22 @@ no-ops) rather than a link error — see §7.
 
 ## 5. Coordinate system & rendering pipeline
 
-- QuickDraw's local coordinate space is top-left-origin, y-down, same
-  as Core Graphics' *view* space when flipped — so each window's
-  backing `NSView` sets `isFlipped = YES`, letting `qd_draw.c` write
-  `Rect{top,left,bottom,right}` straight into `CGContext` calls
-  without manual axis flipping.
-- Each `WindowPtr` owns one off-screen `CGContext` (ARGB8888,
-  device RGB) sized to the window's port rect. All `QDDraw*` calls
-  render into that context.
-- On `updateEvt` / `BeginUpdate`/`EndUpdate`, `app_shell.m`'s
-  `NSView.drawRect:` simply blits the window's `CGContext` image to
-  screen — the classic app never talks to `NSView` directly, it only
-  ever draws into the offscreen buffer via `SetPort`/QuickDraw calls.
+- Each `WindowPtr` owns one off-screen `CGContext` (8-bit RGBA,
+  device RGB) sized to the window's port rect, but it's a *plain
+  native* (bottom-left-origin, y-up) bitmap context, not a flipped
+  one — `QuickDraw.c` converts classic top-down `Rect`/`Point`
+  coordinates to native bottom-up ones itself on every call (using
+  the port's height), rather than fighting a CTM flip. See §10 for
+  why: a flipped buffer's `CGImage` doesn't composite correctly into
+  a flipped `NSView` without extra correction, so keeping the buffer
+  native and doing the flip once at blit time (in `CocoaBridge.m`)
+  turned out simpler than flipping twice.
+- `CocoaBridge.m`'s `RMContentView.drawRect:` blits the window's
+  `CGContext` image to screen on every AppKit repaint — the classic
+  app never talks to `NSView` directly, it only ever draws into the
+  offscreen buffer via `SetPort`/QuickDraw calls, and `RM_MarkDirty`/
+  `RM_FlushDirtyWindows` (called at the top of `WaitNextEvent`) is
+  what actually triggers that repaint once per event-loop iteration.
 - Text: `DrawString`/`DrawChar`/`StringWidth`/`GetFontInfo` are
   implemented with Core Text, using the current `TextFont`/`TextSize`/
   `TextFace` as a lookup into a small table mapping classic font IDs
@@ -165,14 +189,15 @@ Two problems classic sources hit on a stock `clang`:
 2. **`"\p..."` Pascal-string literals** — MPW/Retro68 GCC has a
    nonstandard escape (`\p` at the *start* of a string literal turns
    it into a length-prefixed Pascal string). Stock clang has no such
-   extension. `retromacc` runs a small source-to-source pass (a
-   `sed`/regex pre-pass, not a full C parser — Pascal-string literals
-   in these files are always simple string constants, never built
-   with macros) that rewrites `"\pFoo"` into a compound literal
-   `(unsigned char[]){4,'F','o','o',0}` — this is the same trick used
-   internally by `c2pstr`-style shims. Escapes like `\311` (octal,
-   0xC9 ellipsis) and `\024` (0x14, Apple logo) are left to the
-   standard C preprocessor, which already understands octal escapes.
+   extension. `retromacc` runs every user source through
+   `pstr_rewrite.py` first, which rewrites `"\pFoo"` into a compound
+   literal `((unsigned char[]){3,70,111,111,0})` — a length byte, the
+   raw Mac-Roman byte values (not re-escaped characters, so the
+   rewrite never has to worry about quoting a stray `"` or `\`), and a
+   trailing NUL. This turned out to need a real (if small) hand-written
+   tokenizer rather than a regex one-liner, specifically so a stray
+   `"\p"`-looking sequence inside a `/* comment */` or `'c'` char
+   literal doesn't get misrewritten — see §10.
 
 Usage:
 
@@ -180,33 +205,38 @@ Usage:
 retromacc wordle.c -o Wordle.app
 ```
 
-`retromacc` is a shell script that: pre-processes `\p` literals →
-temp file, compiles with `clang -Dmain=RetroMacUserMain -IRetroMac/include`,
-links against `libRetroMac.a` + `app_shell.m` + AppKit/CoreGraphics/
-CoreText frameworks, and wraps the resulting Mach-O binary in a
+`retromacc` rewrites each user source with `pstr_rewrite.py`, compiles
+it with `clang -Dmain=RetroMacUserMain -I RetroMac/include`, compiles
+the runtime sources normally (no `-Dmain`, since `AppShell.m` needs to
+keep its own real `main()`), links everything against AppKit/
+CoreGraphics/CoreText, and wraps the resulting Mach-O binary in a
 minimal `.app` bundle (`Info.plist` + bundle dirs) so it's
-double-clickable and gets a normal menu bar/Dock icon.
+double-clickable and gets a normal menu bar/Dock icon. On Apple
+Silicon it also ad-hoc codesigns the bundle (`codesign --sign -`) —
+an unsigned Mach-O simply won't launch there.
 
 ## 7. Stub policy
 
 Toolbox calls outside the Phase 0 table (§4) that later test
 programs need — e.g. `GetNewWindow`, `ParamText`, `Alert`,
 `TESetText` — should be added incrementally, in the same
-implementation style, rather than stubbed indefinitely. But to keep
-*unrelated* undeclared calls from turning into link errors while a
-new sample is being brought up, `Memory.h`/`OSUtils.h` provide a
-`RETROMAC_STUB(name)` macro that: emits a weak symbol, prints
-`"RetroMac: <name> not implemented"` to stderr the first time it's
-hit, and returns a zeroed result. This is a development aid, not a
-permanent crutch — anything still stubbed when a sample ships is a
-bug.
+implementation style, rather than stubbed indefinitely.
+
+The planned `RETROMAC_STUB(name)` weak-symbol macro (auto-stubbing
+any undeclared call with a stderr warning) was **not** built for
+Phase 0 — it wasn't needed, since `wordle.c`/`demo.c` only ever call
+things already in the §4 table, and a real link error for a missing
+symbol is arguably a clearer signal during bring-up than a silently
+no-op'd trap anyway. Revisit this if/when Phase 1 samples start
+needing a wider surface incrementally.
 
 ## 8. Phased roadmap
 
-- **Phase 0** — the table in §4. Target: `wordle.c` and `demo.c`
-  compile with `retromacc` and are playable/clickable, pixel-for-pixel
-  faithful enough that green/yellow/gray cell coloring, the About
-  dialog, and menu commands all work.
+- **Phase 0 — done.** The table in §4. `wordle.c` and `demo.c` both
+  compile with `retromacc` and are playable/clickable: green/yellow/
+  gray cell coloring, the About dialog, and menu commands all
+  verified working by launching the built apps and driving them with
+  real clicks/keystrokes. See §10 for the bring-up notes.
 - **Phase 1** — Dialog Manager proper (`GetNewDialog`, `ModalDialog`,
   `DITL`-less programmatic dialogs already covered by Phase 0's
   `dBoxProc`-style windows), `Alert`/`StopAlert`, `TextEdit` editable
@@ -224,14 +254,102 @@ bug.
 
 ## 9. Testing plan
 
-- `wordle.c` and `demo.c` become the Phase 0 acceptance tests: build
+- `wordle.c` and `demo.c` are the Phase 0 acceptance tests: build
   with `retromacc`, launch, and manually verify (per this repo's
-  `/verify`-style workflow): menu bar renders and responds to
-  Cmd-key equivalents, window drags/closes, About dialog's OK button
-  and default-button ring draw correctly, and (for Wordle) a full
-  game — typing letters, backspace, Enter, win/loss messaging, File ▸
-  New Game — behaves identically to the described rules.
+  `/verify`-style workflow): menu bar renders and responds to real
+  clicks, About dialog's OK button and default-button ring draw
+  correctly, and (for Wordle) a full game — typing letters,
+  backspace, Enter, win/loss messaging, File ▸ New Game — behaves
+  identically to the described rules. **Done for Phase 0** — see §10
+  for exactly what was and wasn't screenshot-confirmed.
 - Once Phase 0 passes, treat each new sample app added to the repo
   as the acceptance test for whatever new Toolbox surface it
   introduces, extending §4's table rather than writing synthetic
   unit tests against Toolbox internals in isolation.
+
+## 10. Phase 0 bring-up notes
+
+Three things about the real Cocoa/AppKit interaction didn't match
+the plan's assumptions, and cost most of the implementation time.
+Recording them here so Phase 1 doesn't re-discover them the hard way.
+
+**AppKit and RetroMac's own headers can't coexist in one file.**
+`#import <Cocoa/Cocoa.h>` transitively drags in
+`ApplicationServices/HIServices/QD.framework`'s legacy Carbon/
+QuickDraw compatibility headers (still shipped in the macOS SDK for
+old source compat), which redefine `WindowPtr`, `GrafPtr`,
+`DialogPtr`, `RGBColor`, `BitMap`, `struct GrafPort`, `TickCount()`,
+and the `HiWord`/`LoWord` macros — the *exact* names RetroMac's own
+public headers define, but with different (opaque/incompatible)
+underlying types. No amount of include-guard trickery fixes this
+(tried predefining `__QUICKDRAW__` to suppress it — breaks unrelated
+declarations elsewhere in the SDK that depend on it, like `Icons.h`
+needing `RGBColor`). The only real fix: **exactly one file
+(`CocoaBridge.m`) is allowed to import AppKit**, and it never
+includes RetroMac's own `Types.h`/`Quickdraw.h`/etc. Every function
+crossing that boundary (`RetroMacBridge.h`) uses only names that are
+safe on both sides — `Point`/`Rect`/`Boolean` (identical in both
+worlds via `<MacTypes.h>`, no collision), plain integers, `void *`
+opaque handles, and `CGContextRef`. This is *the* architectural
+change from the original plan (which assumed a handful of `.m` files
+each owning one manager).
+
+**A freshly-created offscreen `CGBitmapContext`'s image is *not*
+auto-oriented when drawn into a flipped `NSView`.** The plan assumed
+`CGContextDrawImage` "just handles" flipped-context orientation.
+Empirically, it doesn't — content rendered upside down (confirmed via
+screenshot: "WORDLE" came out looking like "ꟽOꓤ⊐ГE") until
+`RMContentView.drawRect:` wraps the blit in an explicit counter-flip
+(`CGContextTranslateCTM` + `CGContextScaleCTM(1,-1)`). Text drawn via
+Core Text directly into the buffer needed no such flip, since the
+buffer itself is a plain native (bottom-left-origin, y-up)
+`CGBitmapContext` and Core Text's baseline model already matches
+that; only the *image compositing step* into the flipped view needed
+correction.
+
+**Real menu-bar clicks never reach the app's own event queue at
+all.** The plan assumed a menu-bar `mouseDown` would show up via
+`[NSApp nextEventMatchingMask:...]` like any other event, letting
+`WaitNextEvent` detect it, forward it to `-sendEvent:` for real
+tracking, and translate the *same* event for the classic app's
+`FindWindow`/`MenuSelect` call chain. Instrumented with debug
+logging: zero mouseDown events were ever observed for real menu-bar
+clicks, yet the `NSMenuItem`'s target-action fired correctly every
+time — AppKit intercepts and fully owns menu-bar click tracking below
+the level `nextEventMatchingMask` can see, invoking the item's action
+via its own internal mechanism regardless. Fix: `RMCocoa_WaitNextEvent`
+polls `RM_HasPendingMenuSelection()` (backed by the same
+`gPendingMenuSelection` slot the `NSMenuItem` action already writes
+to) and *synthesizes* a `mouseDown` in the menu-bar strip once a
+selection appears, letting the classic app's existing
+`FindWindow → inMenuBar → MenuSelect` code run unmodified. This in
+turn caused a **100%-CPU busy-spin**: if the current event loop never
+calls `MenuSelect` to consume the pending value (e.g. `DoAboutDialog`'s
+own simplified nested loop, which classic apps commonly write without
+menu handling), the synthetic event gets re-manufactured on every
+call with zero delay forever. Fixed by pacing that path to the same
+~20 Hz slice used for normal polling (`[NSThread sleepForTimeInterval:
+sliceInterval]` before returning) — a never-consumed selection now
+just idles harmlessly instead of pegging a core.
+
+**Known Phase 0 limitations, accepted rather than fixed:**
+- The Apple-menu's title shows the bold running-app name ("Wordle")
+  instead of the classic Apple-logo glyph. Cocoa forces `mainMenu`
+  item 0's *displayed* title to the process name regardless of what
+  string the `NSMenuItem` was given — a real, documented Cocoa
+  convention, not a bug in the byte-0x14-sentinel handling (which
+  correctly identifies the Apple menu internally; it just can't win
+  the display-title fight for slot 0).
+- Window dragging (`DragWindow`) and the close box (`TrackGoAway`)
+  are implemented with the same `RMCocoa_TrackMouse` primitive already
+  proven live for `TrackControl`'s button-press tracking, and reviewed
+  by inspection, but weren't independently screenshot-confirmed in a
+  dedicated interactive test the way window rendering, keyboard input,
+  game logic, the menu bar, and the About dialog were — AppleScript UI
+  scripting can't reliably hit-test RetroMac's borderless,
+  accessibility-invisible windows by position for this specific
+  gesture (menu bar items live in a separate, reliably-queryable
+  accessibility tree; window content does not, since `NSWindow`
+  instances with `NSWindowStyleMaskBorderless` don't expose the same
+  `AXWindow` surface a titled window would). Worth a manual click-test
+  pass before relying on it.
