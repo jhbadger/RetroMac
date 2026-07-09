@@ -52,6 +52,7 @@ extern "C" {
 /* ==== C (Toolbox logic) calling into Objective-C (CocoaBridge.m) ==== */
 
 void RMCocoa_Init(void); /* NSApplication bootstrap; called once from AppShell.m */
+void RMCocoa_Beep(void); /* SysBeep -- NSBeep() */
 
 /* Windows */
 void *RMCocoa_CreateWindow(Rect contentBoundsGlobal, int hasTitleBar, void *ownerGrafPort, void **outView);

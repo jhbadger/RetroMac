@@ -32,6 +32,7 @@ enum {
 
 /* Modifier bits */
 enum {
+    activeFlag = 0x0001, /* activateEvt only: set = becoming active, clear = deactivating */
     cmdKey     = 0x0100,
     shiftKey   = 0x0200,
     alphaLock  = 0x0400,

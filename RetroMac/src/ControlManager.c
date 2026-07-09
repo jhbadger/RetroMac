@@ -15,7 +15,7 @@ static void RM_DrawControl(ControlHandle c)
 {
     if (!c || !c->visible || !c->owner || !c->owner->buffer) return;
 
-    CGContextRef ctx = c->owner->buffer;
+    CGContextRef ctx = (CGContextRef)c->owner->buffer;
     int h = c->owner->height;
     CGRect cr = CGRectMake(c->bounds.left, h - c->bounds.bottom,
                            c->bounds.right - c->bounds.left, c->bounds.bottom - c->bounds.top);

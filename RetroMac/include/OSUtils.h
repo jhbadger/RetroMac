@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 unsigned long TickCount(void);
+void SysBeep(short duration);
 
 #ifdef __cplusplus
 }

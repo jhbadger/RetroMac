@@ -25,6 +25,23 @@ long MenuSelect(Point startPt);
 long MenuKey(short ch);
 void HiliteMenu(short menuID);
 
+/* Phase 3: unpacks an MBAR resource (a list of MENU resource IDs),
+ * materializes each one via GetMenu, and returns a Handle identifying
+ * the set for SetMenuBar -- exactly like real GetNewMBar/SetMenuBar,
+ * so a whole menu bar can be installed from resources in two calls
+ * instead of one GetMenu/InsertMenu pair per menu. */
+Handle GetNewMBar(short mbarID);
+void SetMenuBar(Handle mbar);
+MenuHandle GetMenuHandle(short menuID);
+
+/* Appends one item per resource of theType found in the app's own
+ * resource file, titled with that resource's name -- real Menu
+ * Manager's Apple-menu desk-accessory list, generalized to any type.
+ * RetroMac has no desk accessories to actually open, so this only
+ * matters for apps (like real ones) that call it defensively even
+ * when they expect zero matches. */
+void AppendResMenu(MenuHandle theMenu, ResType theType);
+
 #ifdef __cplusplus
 }
 #endif

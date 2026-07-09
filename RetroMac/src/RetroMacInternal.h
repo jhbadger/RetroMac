@@ -22,73 +22,17 @@ extern "C" {
 #define RM_MAX_WINDOWS     16
 #define RM_MAX_MENUS       16
 #define RM_MAX_MENU_ITEMS  32
-#define RM_MAX_CONTROLS    16
-#define RM_MAX_TE_FIELDS   4
-/* RM_TITLEBAR_HEIGHT / RM_MENUBAR_HEIGHT come from RetroMacBridge.h */
+/* RM_MAX_CONTROLS / RM_MAX_TE_FIELDS now live in Quickdraw.h (public --
+ * GrafPort's inline control/TE-field arrays need them there).
+ * RM_TITLEBAR_HEIGHT / RM_MENUBAR_HEIGHT come from RetroMacBridge.h */
 
-/* ---- Controls ------------------------------------------------------ */
-
-struct ControlRecord {
-    Boolean   inUse;
-    WindowPtr owner;
-    Rect      bounds;      /* local to owner's content area */
-    unsigned char title[256];
-    short     value, min, max;
-    Boolean   visible;
-    Boolean   hilited;     /* true while pressed/tracking   */
-    short     procID;
-    short     itemNumber;  /* dialog item number -- see TERec's itemNumber */
-};
-
-/* ---- TextEdit --------------------------------------------------------
- * No DITL/resource-based item numbering exists (Phase 2 work), so both
- * ControlRecord and TERec are assigned itemNumber from the owning
- * window's nextItemNumber counter at creation time, in whatever order
- * the app calls NewControl/TENew -- ModalDialog's itemHit reads this
- * back directly instead of consulting a DITL item list. */
-
-struct TERec {
-    Boolean   inUse;
-    WindowPtr owner;
-    Rect      viewRect;    /* local to owner window's content area */
-    char     *text;        /* heap buffer, grows via realloc; NUL-terminated */
-    short     length;
-    short     selStart, selEnd; /* selStart == selEnd => caret, no selection */
-    Boolean   active;
-    Boolean   caretVisible;
-    unsigned long lastBlinkTick;
-    short     itemNumber;
-};
-
-/* ---- Windows --------------------------------------------------------
+/* ---- Windows ----------------------------------------------------------
  * WindowPtr == GrafPtr == &gWindows[i]; these live in a fixed pool
  * rather than being malloc'd individually, so ControlHandles (which
  * point into owner->controls[]) stay valid for the window's lifetime
- * without a separate allocator. */
-
-struct GrafPort {
-    Boolean    inUse;
-    void      *nsWindow;   /* NSWindow *       */
-    void      *nsView;     /* RMContentView *  */
-    CGContextRef buffer;   /* offscreen content bitmap, content-area sized */
-    int        width, height;   /* content area size (excludes titlebar) */
-    Boolean    hasTitleBar;     /* documentProc: true, dBoxProc: false   */
-    Boolean    hasGoAway;
-    Boolean    isVisible;
-    Boolean    needsDisplay;
-    unsigned char title[256];   /* Pascal string */
-    Point      contentOriginGlobal; /* top-left of content area, classic global coords */
-
-    Point      pen;
-    short      penH, penV;
-    RGBColor   fgColor, bgColor;
-    short      txFont, txSize, txFace;
-
-    short      nextItemNumber; /* next dialog item number to assign (see TERec) */
-
-    struct ControlRecord controls[RM_MAX_CONTROLS];
-    struct TERec teFields[RM_MAX_TE_FIELDS];
-};
+ * without a separate allocator. struct GrafPort itself is now fully
+ * defined in the public Quickdraw.h (see there for why) -- this file
+ * just owns the pool. */
 
 extern struct GrafPort gWindows[RM_MAX_WINDOWS];
 extern WindowPtr gCurrentPort;     /* SetPort target -- QuickDraw calls go here */
@@ -154,6 +98,11 @@ void RM_FlushDirtyWindows(void);       /* called at top of WaitNextEvent; flushe
  * DITL, Alert/DITL) shares these rather than reimplementing them. */
 unsigned short RM_ReadU16BE(const unsigned char *p);
 unsigned long RM_ReadU32BE(const unsigned char *p);
+
+/* Enumeration by type (AppendResMenu, MenuManager.c) -- theType's
+ * resources in the app's own resource file, 1-based index order. */
+short RM_CountResourcesOfType(ResType theType);
+Boolean RM_GetIndResourceInfo(ResType theType, short index1Based, short *outResID, unsigned char *outName);
 
 #ifdef __cplusplus
 }

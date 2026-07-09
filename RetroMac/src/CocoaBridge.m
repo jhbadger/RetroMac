@@ -144,6 +144,21 @@ static Point ClassicPointFromScreenPoint(NSPoint p)
     return pt;
 }
 
+/* Translates Cocoa's modifierFlags into classic EventRecord.modifiers
+ * bits (Events.h) -- shared by every event type RMCocoa_WaitNextEvent
+ * reports, so shift-click-to-extend (TEClick's `extend` param, driven
+ * by shiftKey) and Cmd-key menu equivalents both see the real state
+ * instead of just Command. */
+static short RMClassicModifiers(NSEventModifierFlags flags)
+{
+    short m = 0;
+    if (flags & NSEventModifierFlagCommand)   m |= 0x0100; /* cmdKey */
+    if (flags & NSEventModifierFlagShift)     m |= 0x0200; /* shiftKey */
+    if (flags & NSEventModifierFlagOption)    m |= 0x0800; /* optionKey */
+    if (flags & NSEventModifierFlagControl)   m |= 0x1000; /* controlKey */
+    return m;
+}
+
 /* ==== bootstrap ========================================================= */
 
 void RMCocoa_Init(void)
@@ -161,6 +176,11 @@ void RMCocoa_Init(void)
         NSApp.mainMenu = [[NSMenu alloc] initWithTitle:@""];
         [NSApp activateIgnoringOtherApps:YES];
     }
+}
+
+void RMCocoa_Beep(void)
+{
+    NSBeep();
 }
 
 /* ==== windows ============================================================ */
@@ -375,7 +395,7 @@ int RMCocoa_WaitNextEvent(unsigned long timeoutTicks, short *outWhat, long *outM
             if (outWhat) *outWhat = 1 /* mouseDown */;
             if (outMessage) *outMessage = 0;
             if (outWhere) *outWhere = gp;
-            if (outModifiers) *outModifiers = (short)((e.modifierFlags & NSEventModifierFlagCommand) ? 0x0100 : 0);
+            if (outModifiers) *outModifiers = RMClassicModifiers(e.modifierFlags);
             return 1;
         }
 
@@ -397,7 +417,7 @@ int RMCocoa_WaitNextEvent(unsigned long timeoutTicks, short *outWhat, long *outM
             if (outWhat) *outWhat = 3 /* keyDown */;
             if (outMessage) *outMessage = (long)(unsigned char)ch;
             if (outWhere) *outWhere = ClassicPointFromScreenPoint([NSEvent mouseLocation]);
-            if (outModifiers) *outModifiers = (short)((e.modifierFlags & NSEventModifierFlagCommand) ? 0x0100 : 0);
+            if (outModifiers) *outModifiers = RMClassicModifiers(e.modifierFlags);
             return 1;
         }
 

@@ -220,6 +220,81 @@ void HiliteMenu(short menuID)
     (void)menuID; /* AppKit already highlighted the chosen title during its own tracking */
 }
 
+MenuHandle GetMenuHandle(short menuID)
+{
+    for (int i = 0; i < RM_MAX_MENUS; i++) {
+        if (gMenus[i].inUse && gMenus[i].menuID == menuID) return &gMenus[i];
+    }
+    return NULL;
+}
+
+/* MBAR layout: count-1 (short) followed by that many menuID shorts --
+ * the same "list of MENU resource IDs" real Menu Manager reads. The
+ * Handle GetNewMBar returns just stores {count, id0, id1, ...} in
+ * native-endian shorts for SetMenuBar to walk; the actual menus are
+ * materialized right here via GetMenu, matching real GetNewMBar's
+ * behavior of instantiating them up front. */
+Handle GetNewMBar(short mbarID)
+{
+    Handle h = Get1Resource('MBAR', mbarID);
+    if (!h || !*h) {
+        fprintf(stderr, "RetroMac: GetNewMBar: MBAR %d not found\n", (int)mbarID);
+        return NULL;
+    }
+
+    const unsigned char *p = (const unsigned char *)*h;
+    short count = (short)(RM_ReadU16BE(p) + 1);
+
+    Handle mbar = NewHandle((long)(sizeof(short) * (size_t)(1 + count)));
+    if (mbar && *mbar) {
+        short *ids = (short *)*mbar;
+        ids[0] = count;
+        for (short i = 0; i < count; i++) {
+            short menuID = (short)RM_ReadU16BE(p + 2 + i * 2);
+            ids[1 + i] = menuID;
+            if (!GetMenuHandle(menuID)) GetMenu(menuID);
+        }
+    }
+    ReleaseResource(h);
+    return mbar;
+}
+
+/* Installs every menu named in an MBAR list into the real menu bar, in
+ * order -- like real SetMenuBar, but simplified: it only ever appends
+ * (matching InsertMenu's own existing simplification), so it's only
+ * meant to be called once per app, right after GetNewMBar, exactly
+ * like every sample app here does. */
+void SetMenuBar(Handle mbar)
+{
+    if (!mbar || !*mbar) return;
+    short *ids = (short *)*mbar;
+    short count = ids[0];
+    for (short i = 0; i < count; i++) {
+        MenuHandle m = GetMenuHandle(ids[1 + i]);
+        if (m) InsertMenu(m, 0);
+    }
+}
+
+/* Appends one item per resource of theType found in the app's own
+ * resource file (see ResourceManager.c's RM_CountResourcesOfType/
+ * RM_GetIndResourceInfo), titled with that resource's name. RetroMac
+ * only ever loads the app's own resource file (no System file), so an
+ * app with no resources of theType -- every sample here, calling this
+ * with 'DRVR' for the desk-accessory list -- sees zero items appended,
+ * same as a real, DA-less System file would produce. */
+void AppendResMenu(MenuHandle theMenu, ResType theType)
+{
+    if (!theMenu) return;
+    short count = RM_CountResourcesOfType(theType);
+    for (short i = 1; i <= count; i++) {
+        short resID = 0;
+        unsigned char name[256];
+        if (!RM_GetIndResourceInfo(theType, i, &resID, name)) continue;
+        if (name[0] == 0) continue; /* unnamed resources don't get a DA-style menu item */
+        AppendMenu(theMenu, name);
+    }
+}
+
 void RM_MenuItemChosen(short menuID, short itemIndex1Based)
 {
     gPendingMenuSelection = ((long)menuID << 16) | (long)itemIndex1Based;

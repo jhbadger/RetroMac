@@ -83,7 +83,7 @@ static CGRect RM_TE_ContentRect(TEHandle hTE)
 static void RM_TE_Draw(TEHandle hTE)
 {
     if (!hTE || !hTE->owner || !hTE->owner->buffer) return;
-    CGContextRef ctx = hTE->owner->buffer;
+    CGContextRef ctx = (CGContextRef)hTE->owner->buffer;
     CGRect cr = RM_TE_ContentRect(hTE);
 
     CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
@@ -311,6 +311,59 @@ void TECalText(TEHandle hTE)
 {
     /* No auto word-wrap/line-break model in Phase 1 -- nothing to
      * recompute beyond a redraw. */
+    RM_TE_Draw(hTE);
+}
+
+/* ==== Cut/Copy/Paste/Clear ==============================================
+ * Real TECut/TECopy/TEPaste route through the shared system scrap
+ * (ZeroScrap/PutScrap/GetScrap), so any two TE fields -- even in
+ * different windows -- can exchange text. RetroMac doesn't implement
+ * the rest of the Scrap Manager (no sample app calls PutScrap/GetScrap
+ * directly), so this is a private buffer sized for exactly TE's own
+ * use: one heap-allocated run of text, shared by every TE field in the
+ * process, same as the classic scrap is shared by every window. */
+static char *gScrapText = NULL;
+static short gScrapLen = 0;
+
+static void RM_SetScrap(const char *text, short len)
+{
+    free(gScrapText);
+    gScrapText = (char *)malloc((size_t)(len > 0 ? len : 1));
+    if (len > 0 && text) memcpy(gScrapText, text, (size_t)len);
+    gScrapLen = len;
+}
+
+void TECut(TEHandle hTE)
+{
+    if (!hTE || hTE->selStart == hTE->selEnd) return;
+    RM_SetScrap(hTE->text + hTE->selStart, (short)(hTE->selEnd - hTE->selStart));
+    RM_TE_ReplaceRange(hTE, hTE->selStart, hTE->selEnd, NULL, 0);
+    hTE->caretVisible = true;
+    hTE->lastBlinkTick = TickCount();
+    RM_TE_Draw(hTE);
+}
+
+void TECopy(TEHandle hTE)
+{
+    if (!hTE || hTE->selStart == hTE->selEnd) return;
+    RM_SetScrap(hTE->text + hTE->selStart, (short)(hTE->selEnd - hTE->selStart));
+}
+
+void TEPaste(TEHandle hTE)
+{
+    if (!hTE || !gScrapText || gScrapLen <= 0) return;
+    RM_TE_ReplaceRange(hTE, hTE->selStart, hTE->selEnd, gScrapText, gScrapLen);
+    hTE->caretVisible = true;
+    hTE->lastBlinkTick = TickCount();
+    RM_TE_Draw(hTE);
+}
+
+void TEDelete(TEHandle hTE)
+{
+    if (!hTE || hTE->selStart == hTE->selEnd) return;
+    RM_TE_ReplaceRange(hTE, hTE->selStart, hTE->selEnd, NULL, 0);
+    hTE->caretVisible = true;
+    hTE->lastBlinkTick = TickCount();
     RM_TE_Draw(hTE);
 }
 

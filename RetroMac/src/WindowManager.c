@@ -18,7 +18,7 @@ int gWindowStackCount = 0;
 
 /* ==== accessors called by CocoaBridge.m's RMContentView drawRect: ===== */
 
-CGContextRef RM_WindowBuffer(void *grafPort) { return ((WindowPtr)grafPort)->buffer; }
+CGContextRef RM_WindowBuffer(void *grafPort) { return (CGContextRef)((WindowPtr)grafPort)->buffer; }
 int RM_WindowInUse(void *grafPort)      { return ((WindowPtr)grafPort)->inUse ? 1 : 0; }
 int RM_WindowHasTitleBar(void *grafPort) { return ((WindowPtr)grafPort)->hasTitleBar ? 1 : 0; }
 int RM_WindowHasGoAway(void *grafPort)   { return ((WindowPtr)grafPort)->hasGoAway ? 1 : 0; }
@@ -34,7 +34,7 @@ void RM_WindowTitleUTF8(void *grafPort, char *out, unsigned long outSize)
 
 CGContextRef RM_CurrentBuffer(void)
 {
-    return gCurrentPort ? gCurrentPort->buffer : NULL;
+    return gCurrentPort ? (CGContextRef)gCurrentPort->buffer : NULL;
 }
 
 WindowPtr RM_AllocWindowSlot(void)
@@ -120,6 +120,10 @@ WindowPtr NewWindow(void *storage, const Rect *boundsRect, ConstStr255Param titl
     w->hasGoAway   = (w->hasTitleBar && goAwayFlag) ? true : false;
     w->width  = width;
     w->height = height;
+    /* portRect is always local-origin, matching width/height above --
+     * there's no SetOrigin/SizeWindow yet, so this is set once here
+     * and never touched again. */
+    SetRect(&w->portRect, 0, 0, (short)width, (short)height);
     w->penH = 1; w->penV = 1;
     w->fgColor = (RGBColor){0, 0, 0};
     w->bgColor = (RGBColor){0xFFFF, 0xFFFF, 0xFFFF};

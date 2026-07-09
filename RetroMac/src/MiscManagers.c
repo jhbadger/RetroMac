@@ -7,6 +7,8 @@
  */
 #include "../include/Fonts.h"
 #include "../include/Memory.h"
+#include "../include/OSUtils.h"
+#include "RetroMacBridge.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,6 +16,12 @@ void InitFonts(void)
 {
     /* Real font/glyph metrics come from Core Text lazily, per draw
      * call (see QuickDraw.c) -- nothing to preload here yet. */
+}
+
+void SysBeep(short duration)
+{
+    (void)duration; /* real SysBeep's duration was in ticks; NSBeep() has no such control */
+    RMCocoa_Beep();
 }
 
 typedef struct RMHandleHeader {

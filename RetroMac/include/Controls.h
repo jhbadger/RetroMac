@@ -3,7 +3,6 @@
 #define RETROMAC_CONTROLS_H
 
 #include "Types.h"
-#include "Quickdraw.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,6 +13,25 @@ enum {
     pushButProc  = 0,
     checkBoxProc = 1,
     radioButProc = 2
+};
+
+/* Full ControlRecord layout -- lives here (not RetroMacInternal.h) so
+ * that Quickdraw.h can embed `struct ControlRecord controls[]` inline
+ * inside GrafPort (see Quickdraw.h) without a header cycle: Quickdraw.h
+ * includes this file, so this file must not include Quickdraw.h back.
+ * Classic apps only ever carry ControlHandles around opaquely, exactly
+ * like real Inside Mac code, but the fields need to be visible here for
+ * GrafPort's inline array to have a complete element type. */
+struct ControlRecord {
+    Boolean   inUse;
+    WindowPtr owner;
+    Rect      bounds;      /* local to owner's content area */
+    unsigned char title[256];
+    short     value, min, max;
+    Boolean   visible;
+    Boolean   hilited;     /* true while pressed/tracking   */
+    short     procID;
+    short     itemNumber;  /* dialog item number -- see TERec's itemNumber */
 };
 
 /* FindControl / TrackControl part codes -- values match Inside Macintosh */

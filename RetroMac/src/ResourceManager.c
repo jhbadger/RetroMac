@@ -123,6 +123,66 @@ Handle GetResource(ResType theType, short theID)
     return Get1Resource(theType, theID);
 }
 
+/* ==== enumeration by type (AppendResMenu, MenuManager.c) ================
+ * Shares Get1Resource's map/type-list walk above but returns the ref
+ * list for a whole type instead of searching it for one ID. */
+static const unsigned char *RM_FindTypeEntry(ResType theType, unsigned short *outRefCount)
+{
+    if (!gResFileData || gResFileSize < 16) return NULL;
+
+    unsigned long mapOffset = RM_ReadU32BE(gResFileData + 4);
+    if (mapOffset + 30 > (unsigned long)gResFileSize) return NULL;
+
+    const unsigned char *map = gResFileData + mapOffset;
+    unsigned short typeListOff = RM_ReadU16BE(map + 24);
+    const unsigned char *typeList = map + typeListOff;
+    unsigned short typeCount = (unsigned short)(RM_ReadU16BE(typeList) + 1);
+    const unsigned char *typeEntry = typeList + 2;
+
+    for (unsigned short i = 0; i < typeCount; i++) {
+        unsigned long entryType = RM_ReadU32BE(typeEntry);
+        unsigned short refCount = (unsigned short)(RM_ReadU16BE(typeEntry + 4) + 1);
+        unsigned short refListOff = RM_ReadU16BE(typeEntry + 6);
+        if (entryType == (unsigned long)theType) {
+            if (outRefCount) *outRefCount = refCount;
+            return typeList + refListOff;
+        }
+        typeEntry += 8;
+    }
+    return NULL;
+}
+
+short RM_CountResourcesOfType(ResType theType)
+{
+    unsigned short refCount = 0;
+    return RM_FindTypeEntry(theType, &refCount) ? (short)refCount : 0;
+}
+
+Boolean RM_GetIndResourceInfo(ResType theType, short index1Based, short *outResID, unsigned char *outName)
+{
+    unsigned short refCount = 0;
+    const unsigned char *refList = RM_FindTypeEntry(theType, &refCount);
+    if (!refList || index1Based < 1 || index1Based > (short)refCount) return false;
+
+    const unsigned char *refEntry = refList + (index1Based - 1) * 12;
+    if (outResID) *outResID = (short)RM_ReadU16BE(refEntry);
+
+    if (outName) {
+        unsigned short nameOff = RM_ReadU16BE(refEntry + 2);
+        outName[0] = 0;
+        if (nameOff != 0xFFFF) {
+            unsigned long mapOffset = RM_ReadU32BE(gResFileData + 4);
+            const unsigned char *map = gResFileData + mapOffset;
+            unsigned short nameListOff = RM_ReadU16BE(map + 26);
+            const unsigned char *nameEntry = map + nameListOff + nameOff;
+            unsigned char len = nameEntry[0];
+            outName[0] = len;
+            memcpy(&outName[1], nameEntry + 1, len);
+        }
+    }
+    return true;
+}
+
 void ReleaseResource(Handle theResource)
 {
     DisposeHandle(theResource);
