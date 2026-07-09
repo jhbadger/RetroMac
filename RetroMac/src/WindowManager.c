@@ -7,6 +7,7 @@
  */
 #include "RetroMacInternal.h"
 #include "../include/Windows.h"
+#include "../include/Resources.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -156,6 +157,40 @@ WindowPtr NewWindow(void *storage, const Rect *boundsRect, ConstStr255Param titl
         gWindowStack[gWindowStackCount++] = w;
     }
 
+    return w;
+}
+
+/* WIND resource layout (confirmed by compiling one with the real
+ * system Rez and hex-dumping the result -- see Toolbox.md section 12):
+ * boundsRect (4 big-endian shorts: top,left,bottom,right -- matches
+ * Rect's own in-memory field order, no reordering needed), procID
+ * (short), visible (short, nonzero = true), goAwayFlag (short, ditto),
+ * refCon (long), title (Pascal string), then an optional trailing
+ * "positioning" word (a Carbon-era addition some Rez output includes)
+ * that RetroMac doesn't need and ignores. */
+WindowPtr GetNewWindow(short windowID, void *wStorage, WindowPtr behind)
+{
+    Handle h = Get1Resource('WIND', windowID);
+    if (!h || !*h) {
+        fprintf(stderr, "RetroMac: GetNewWindow: WIND %d not found\n", (int)windowID);
+        return NULL;
+    }
+
+    const unsigned char *p = (const unsigned char *)*h;
+    Rect bounds;
+    bounds.top    = (short)RM_ReadU16BE(p + 0);
+    bounds.left   = (short)RM_ReadU16BE(p + 2);
+    bounds.bottom = (short)RM_ReadU16BE(p + 4);
+    bounds.right  = (short)RM_ReadU16BE(p + 6);
+    short procID    = (short)RM_ReadU16BE(p + 8);
+    Boolean visible  = RM_ReadU16BE(p + 10) != 0;
+    Boolean goAway   = RM_ReadU16BE(p + 12) != 0;
+    long refCon      = (long)RM_ReadU32BE(p + 14);
+    unsigned char title[256];
+    RM_PStringCopy(title, p + 18);
+
+    WindowPtr w = NewWindow(wStorage, &bounds, title, visible, procID, behind, goAway, refCon);
+    ReleaseResource(h);
     return w;
 }
 

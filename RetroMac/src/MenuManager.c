@@ -15,6 +15,7 @@
  */
 #include "RetroMacInternal.h"
 #include "../include/Menus.h"
+#include "../include/Resources.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -112,6 +113,69 @@ void AppendMenu(MenuHandle m, ConstStr255Param data)
         RMCocoa_AppendMenuItem(m->nsMenu, utf8, item->cmdKey, 0, item->enabled ? 1 : 0,
                                 m->menuID, itemIndex1Based);
     }
+}
+
+/* MENU resource layout (confirmed by compiling one with the real
+ * system Rez and hex-dumping the result -- see Toolbox.md section 12):
+ * menuID (short), menuWidth/menuHeight (shorts, ignored -- computed at
+ * runtime by real Menu Manager, and RetroMac's NSMenu-backed bar
+ * doesn't need them either), a 4-byte menuProc placeholder (ignored --
+ * always zero on disk), enableFlags (long, bit 0 = the menu itself,
+ * bit N = item N), title (Pascal string -- the `apple` Rez keyword
+ * compiles to the same single 0x14 sentinel byte NewMenu already
+ * special-cases), then items until a zero-length title ends the list:
+ * itemTitle (pstr), icon (byte, ignored), cmdKey (byte), mark (byte,
+ * ignored), style (byte, ignored). A title of exactly "-" is a
+ * separator, matching AppendMenu's own convention. */
+MenuHandle GetMenu(short resID)
+{
+    Handle h = Get1Resource('MENU', resID);
+    if (!h || !*h) {
+        fprintf(stderr, "RetroMac: GetMenu: MENU %d not found\n", (int)resID);
+        return NULL;
+    }
+
+    const unsigned char *p = (const unsigned char *)*h;
+    short menuID = (short)RM_ReadU16BE(p + 0);
+    unsigned long enableFlags = RM_ReadU32BE(p + 10);
+    unsigned char title[256];
+    RM_PStringCopy(title, p + 14);
+
+    MenuHandle m = NewMenu(menuID, title);
+    if (!m) { ReleaseResource(h); return NULL; }
+
+    long offset = 14 + 1 + RM_PStringLength(title);
+    for (short itemNum = 1; ; itemNum++) {
+        short len = (short)p[offset];
+        if (len == 0) break; /* zero-length title ends the item list */
+
+        unsigned char itemTitle[256];
+        RM_PStringCopy(itemTitle, p + offset);
+        char cmdKey = (char)p[offset + 1 + len + 1]; /* icon byte, then cmdKey */
+        Boolean enabled = (itemNum < 32) ? (((enableFlags >> itemNum) & 1) != 0) : true;
+
+        if (len == 1 && itemTitle[1] == '-') {
+            unsigned char sep[] = { 1, '-' };
+            AppendMenu(m, sep);
+        } else {
+            unsigned char spec[258];
+            short specLen = 0;
+            if (!enabled) spec[1 + specLen++] = '(';
+            memcpy(&spec[1 + specLen], &itemTitle[1], (size_t)len);
+            specLen = (short)(specLen + len);
+            if (cmdKey) {
+                spec[1 + specLen++] = '/';
+                spec[1 + specLen++] = cmdKey;
+            }
+            spec[0] = (unsigned char)specLen;
+            AppendMenu(m, spec);
+        }
+
+        offset += 1 + len + 4; /* title + icon/cmdKey/mark/style */
+    }
+
+    ReleaseResource(h);
+    return m;
 }
 
 void InsertMenu(MenuHandle m, short beforeID)

@@ -36,6 +36,10 @@ void InitWindows(void);
 WindowPtr NewWindow(void *storage, const Rect *boundsRect, ConstStr255Param title,
                      Boolean visible, short procID, WindowPtr behind,
                      Boolean goAwayFlag, long refCon);
+
+/* Phase 2: unpacks a WIND resource (see Toolbox.md) and calls NewWindow. */
+WindowPtr GetNewWindow(short windowID, void *wStorage, WindowPtr behind);
+
 void DisposeWindow(WindowPtr w);
 
 void ShowWindow(WindowPtr w);

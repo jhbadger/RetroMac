@@ -148,6 +148,13 @@ void RM_PStringCopy(unsigned char *dst, const unsigned char *src);
 void RM_MarkDirty(WindowPtr w);
 void RM_FlushDirtyWindows(void);       /* called at top of WaitNextEvent; flushes buffers to screen */
 
+/* ---- Resource Manager big-endian accessors (ResourceManager.c) -------
+ * Resource fork data is always big-endian regardless of host CPU;
+ * every resource-backed unpacker (GetNewWindow, GetMenu, GetNewDialog/
+ * DITL, Alert/DITL) shares these rather than reimplementing them. */
+unsigned short RM_ReadU16BE(const unsigned char *p);
+unsigned long RM_ReadU32BE(const unsigned char *p);
+
 #ifdef __cplusplus
 }
 #endif

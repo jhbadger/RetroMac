@@ -1,6 +1,6 @@
 # RetroMac Toolbox — a Classic Mac Toolbox shim for modern macOS
 
-> **Status: Phase 0 and Phase 1 are done and verified.** `wordle.c` and
+> **Status: Phases 0, 1, and 2 are done and verified.** `wordle.c` and
 > `demo.c` both build with `retromacc` and run as real, interactive
 > `.app` bundles — windows, colored/text drawing, keyboard input, the
 > real system menu bar, and the programmatic About dialog all
@@ -11,11 +11,15 @@
 > acceptance test, confirmed the same way. `DragWindow` (previously
 > only reviewed by inspection) and a 2× display scale (§5) are also now
 > confirmed working, including fixing a real `DragWindow` bug the
-> scaling work surfaced. The component map in §3 and the build-wrapper
-> description in §6 describe what was actually built (which diverged
-> from the original plan in a few places); see §10 for Phase 0's
-> bring-up notes, §11 for Phase 1's, and §12 for the display-scale
-> notes.
+> scaling work surfaced. Phase 2 adds a real Resource Manager
+> (`GetResource`/`Get1Resource`) and wires `GetNewWindow`/`GetMenu`/
+> `GetNewDialog`/`Alert` family to real `WIND`/`MENU`/`DLOG`+`DITL`/
+> `ALRT`+`DITL` resources compiled by the real system `Rez`;
+> `rezdemo.c`/`rezdemo.r` is its acceptance test, confirmed the same
+> way. The component map in §3 and the build-wrapper description in §6
+> describe what was actually built (which diverged from the original
+> plan in a few places); see §10 for Phase 0's bring-up notes, §11 for
+> Phase 1's, §12 for the display-scale notes, and §13 for Phase 2's.
 
 ## 1. Goal
 
@@ -78,7 +82,8 @@ RetroMac/
 │   │                            MacTypes.h; only RGBColor + opaque WindowPtr/
 │   │                            MenuHandle/ControlHandle are added on top
 │   ├── Quickdraw.h, Fonts.h, Windows.h, Menus.h, TextEdit.h,
-│   │   Dialogs.h, Events.h, Memory.h, Controls.h, OSUtils.h
+│   │   Dialogs.h, Events.h, Memory.h, Controls.h, OSUtils.h,
+│   │   Resources.h (Phase 2: GetResource/Get1Resource/ReleaseResource)
 ├── src/
 │   ├── RetroMacBridge.h          the ONLY header shared with CocoaBridge.m -- see
 │   │                             §10 for why a hard C/Objective-C split was needed
@@ -109,10 +114,17 @@ RetroMac/
 │   │                             unwrapped editable line per field, drawn with Core
 │   │                             Text for both rendering and hit-testing, embedded
 │   │                             in each window's teFields[] pool
-│   ├── DialogManager.c           Phase 1: NewDialog/ModalDialog/ParamText/Alert
-│   │                             family -- DialogPtr is just WindowPtr (Types.h);
-│   │                             GetNewDialog is a documented stub (no Resource
-│   │                             Manager until Phase 2)
+│   ├── DialogManager.c           NewDialog/ModalDialog/ParamText/Alert family
+│   │                             (Phase 1) -- DialogPtr is just WindowPtr (Types.h).
+│   │                             GetNewDialog and DITL-driven Alert layouts (Phase 2)
+│   │                             share one DITL-instantiation helper with GetNewDialog
+│   ├── ResourceManager.c         Phase 2: GetResource/Get1Resource/ReleaseResource --
+│   │                             parses the real resource-fork binary format (header/
+│   │                             data/map/type-list/reference-list) that the real
+│   │                             system Rez produces; also exports the big-endian
+│   │                             read helpers WIND/MENU/DITL/DLOG/ALRT unpacking
+│   │                             (in WindowManager.c/MenuManager.c/DialogManager.c)
+│   │                             all share
 │   ├── CocoaBridge.m             the ONLY Objective-C / AppKit-importing file --
 │   │                             not in the original plan; see §10. Owns RMWindow/
 │   │                             RMContentView, NSMenu construction, NSApplication
@@ -126,6 +138,12 @@ RetroMac/
 │   └── pstr_rewrite.py           the "\p" literal rewrite pass (a real small
 │                                  Python tokenizer, not a sed/regex one-liner --
 │                                  see §6)
+├── rez/
+│   └── RetroMac.r                Phase 2: one-line convenience #include of the
+│                                  real system .r interface headers (MacTypes.r/
+│                                  MacWindows.r/Menus.r/Dialogs.r) -- unlike the C
+│                                  side, RetroMac doesn't reimplement its own .r
+│                                  templates; real Rez already ships correct ones
 └── Toolbox.md                    this document
 ```
 
@@ -169,11 +187,24 @@ no-ops) rather than a link error — see §7.
 | TextEdit | `TENew`, `TEDispose`, `TESetText`, `TEGetText`, `TEClick`, `TEKey`, `TEIdle`, `TEActivate`, `TEDeactivate`, `TEUpdate`, `TESetSelect`, `TECalText` |
 | Types | `DialogPtr` (== `WindowPtr`), `TEHandle` |
 
-`GetNewDialog` is declared but is a documented stub (§7) — there's no
-Resource Manager yet to look up a dialog ID's DLOG/DITL against
-(Phase 2). See §11 for what `NewDialog`/`ModalDialog`/TextEdit
-actually diverge from real Inside Macintosh behavior to work without
-one.
+`GetNewDialog` was declared but was a documented stub (§7) through
+Phase 1 — there was no Resource Manager yet to look up a dialog ID's
+DLOG/DITL against. See §11 for what `NewDialog`/`ModalDialog`/TextEdit
+diverge from real Inside Macintosh behavior to work without one.
+
+### 4b. API surface added for Phase 2 (`rezdemo.c`)
+
+| Category | Functions |
+|---|---|
+| Resource Manager | `GetResource`, `Get1Resource`, `ReleaseResource` |
+| Window Manager | `GetNewWindow` (now real — unpacks a `WIND` resource) |
+| Menu Manager | `GetMenu` (unpacks a `MENU` resource) |
+| Dialog Manager | `GetNewDialog` (now real — unpacks `DLOG`+`DITL`); `Alert`/`StopAlert`/`NoteAlert`/`CautionAlert` now look up a real `ALRT`+`DITL` by ID, falling back to Phase 1's fixed hand-drawn box if none exists |
+
+No new types — `ResType`/`Handle` already come from `<MacTypes.h>` via
+`Types.h`. See §13 for the exact binary layouts (empirically confirmed
+by compiling real resources with the real system Rez and hex-dumping
+the result) and the divergences this surfaced.
 
 ## 5. Coordinate system & rendering pipeline
 
@@ -264,6 +295,18 @@ double-clickable and gets a normal menu bar/Dock icon. On Apple
 Silicon it also ad-hoc codesigns the bundle (`codesign --sign -`) —
 an unsigned Mach-O simply won't launch there.
 
+**Phase 2: `.r` files** — pass any `.r` sources alongside the `.c`
+ones, e.g. `retromacc rezdemo.c rezdemo.r -o RezDemo.app`. Each is
+compiled by the *real* system `Rez` (found via `xcrun`, present on any
+machine with Xcode or just the Command Line Tools) against
+`RetroMac/rez/RetroMac.r`'s umbrella include, producing a flat
+resource-format blob (`-useDF`) embedded as `Contents/Resources/
+Resources.rsrc`, which `AppShell.m` loads at boot. `.r` files are
+**listed explicitly, not auto-detected** by matching a `.c` file's
+basename — see §13 for why that distinction turned out to matter in
+practice (this repo has a stale, unrelated `demo.r` that happens to
+share `demo.c`'s basename purely by coincidence).
+
 ## 7. Stub policy
 
 Toolbox calls outside the Phase 0 table (§4) that later test
@@ -271,18 +314,18 @@ programs need — e.g. `GetNewWindow`, `ParamText`, `Alert`,
 `TESetText` — should be added incrementally, in the same
 implementation style, rather than stubbed indefinitely. Phase 1 did
 exactly this for `ParamText`/`Alert`/`TESetText` (now real, §4a);
-`GetNewDialog` is the one Phase 1 symbol that stayed a real stub,
-since it fundamentally needs the Resource Manager (Phase 2), not just
-more implementation effort.
+`GetNewDialog` was the one Phase 1 symbol that stayed a real stub,
+since it fundamentally needed the Resource Manager, not just more
+implementation effort — Phase 2 (§4b) is exactly that, and
+`GetNewDialog` is now real too. No stubs remain as of Phase 2.
 
 The planned `RETROMAC_STUB(name)` weak-symbol macro (auto-stubbing
 any undeclared call with a stderr warning) was **not** built for
 Phase 0 — it wasn't needed, since `wordle.c`/`demo.c` only ever call
 things already in the §4 table, and a real link error for a missing
 symbol is arguably a clearer signal during bring-up than a silently
-no-op'd trap anyway. Still not needed as of Phase 1 — `dialogdemo.c`
-only calls things in §4/§4a, plus the one explicit `GetNewDialog`
-stub above.
+no-op'd trap anyway. Still not needed as of Phase 2 — every sample app
+only calls things in §4/§4a/§4b.
 
 ## 8. Phased roadmap
 
@@ -302,10 +345,21 @@ stub above.
   click-to-reposition the caret, OK vs. Cancel, Return-triggers-
   default-item, and the `NoteAlert` icon/message. `GetNewDialog`
   (resource-ID based) is a documented stub — see §4a/§11.
-- **Phase 2** — Resource Manager subset: parse `.rsrc`/Rez-compiled
-  data so `demo.r`-style resource-driven apps (not just
-  programmatic ones) can load `WIND`/`MENU`/`DITL`/`ALRT` resources
-  at runtime instead of requiring hand-written C.
+- **Phase 2 — done.** The table in §4b. Real Resource Manager
+  (`GetResource`/`Get1Resource`/`ReleaseResource`) reading the actual
+  resource-fork binary format that the real system `Rez` produces (no
+  reimplemented Rez compiler needed — see §13); `GetNewWindow`,
+  `GetMenu`, `GetNewDialog`, and the `Alert` family now all load real
+  `WIND`/`MENU`/`DLOG`+`DITL`/`ALRT`+`DITL` resources.
+  `rezdemo.c`/`rezdemo.r` compiles with `retromacc` (`.r` files are
+  passed explicitly, not auto-detected — the stale `demo.r` already in
+  this repo predates RetroMac and is unrelated, see §13) and was
+  verified working by launching the built app and driving it with real
+  clicks/keystrokes: the `WIND`-placed/titled main window, both
+  `MENU`-loaded menus (including a working Cmd-key), the `DLOG`+`DITL`
+  dialog's statText/OK/Cancel, Return resolving to the real DITL-order
+  default item, and the chained `ALRT`+`DITL` alert's `^0` substitution
+  all confirmed on screen.
 - **Phase 3** — Color QuickDraw regions/`PICT`, offscreen `GWorld`s,
   `Random`/sound (`SysBeep`), scrap (clipboard) via `TextEdit`
   `TECopy`/`TEPaste` → macOS pasteboard.
@@ -333,6 +387,12 @@ stub above.
   tripping the text via `TESetText`/`TEGetText`), Return triggering
   the default item, and a `NoteAlert` built from `ParamText`.
   **Done for Phase 1** — see §11.
+- `rezdemo.c`/`rezdemo.r` is the Phase 2 acceptance test: build with
+  `retromacc rezdemo.c rezdemo.r -o RezDemo.app`, launch, and manually
+  verify the `WIND`/`MENU`/`DLOG`+`DITL`/`ALRT`+`DITL` resources alone
+  (no hand-authored `NewWindow`/`NewMenu`/`NewDialog` calls) drive a
+  working window, menu bar, dialog, and alert. **Done for Phase 2** —
+  see §13.
 
 ## 10. Phase 0 bring-up notes
 
@@ -514,3 +574,106 @@ actual regression this section exists to document — dragging a
 `documentProc` window by its visible title bar, and clicking its
 visible close box, both now work, confirmed by the user directly
 rather than by automated screenshot alone.
+
+## 13. Phase 2 bring-up notes
+
+**Real `Rez`/`DeRez` are genuinely present and usable** — `/usr/bin/Rez`
+(and under both a full Xcode.app and just the Command Line Tools,
+discoverable via `xcrun --show-sdk-path` regardless of which is
+active), along with the real system `.r` interface headers
+(`MacTypes.r`, `MacWindows.r`, `Menus.r`, `Dialogs.r` under the
+Carbon/CarbonCore framework headers in the SDK). `Rez -useDF` compiles
+ordinary `.r` source into a flat, single-file resource-fork-format blob
+— no HFS+ resource-fork/xattr involved, and no reimplemented Rez
+compiler needed on RetroMac's side, unlike `retromacc`'s bespoke `\p`-
+string rewriter (which exists because no stock tool does that job).
+
+**The exact binary layouts below were confirmed empirically** — by
+compiling real resources with the real system Rez and decoding the
+output byte-for-byte with a throwaway Python script cross-checked
+against the known Rez source, not by trusting memory of Inside
+Macintosh. That process caught two real bugs before they shipped:
+
+- `GetMenu`'s first draft read `enableFlags` at offset 8 and the title
+  at offset 12 — both off by 2 (the real menuProc placeholder field is
+  4 bytes, not 2). A smoke test that only checked "`GetMenu` returns a
+  non-NULL handle and doesn't crash" would not have caught this — it
+  took decoding a real compiled `MENU` resource field-by-field in
+  Python and comparing against the known source to notice. Lesson:
+  "didn't crash" is not evidence a byte-offset parser is correct;
+  decode a real example against known values before trusting it.
+- `retromacc`'s first draft auto-detected a `.r` file to compile by
+  matching a `.c` file's basename (`demo.c` → look for `demo.r`). This
+  repo already has a `demo.r` — a leftover from before RetroMac existed
+  (`git log --follow` traces it to the very first commit) that
+  references an unrelated Retro68/MacBinary/WASM "splice" pipeline —
+  which happens to share `demo.c`'s basename by pure coincidence.
+  Auto-detection silently tried to compile it and broke `demo.c`'s
+  previously-working build (`demo.r` references headers, like
+  `Windows.r`, that don't exist under that name in the modern SDK).
+  Fixed by requiring `.r` files to be listed explicitly on the
+  `retromacc` command line instead of inferred from a `.c` file's name
+  — caught by rebuilding *all* existing samples after adding the new
+  feature, not just the new one.
+
+Confirmed resource-fork container format (all multi-byte fields
+big-endian): a 16-byte header (`dataOffset`, `mapOffset`, `dataLength`,
+`mapLength`, each a 4-byte length), a data section of
+length-prefixed (4-byte length) blobs, and a map section: a 16-byte
+copy of the header, a 4-byte next-map handle (unused), a 2-byte file
+ref num (unused), a 2-byte attributes word, a 2-byte type-list offset
+and 2-byte name-list offset (both relative to the map's start), then
+the type list itself (a count-1 word, then per type: 4-byte `ResType`,
+count-1 word, reference-list offset relative to the type list's own
+start) and each type's reference list (per entry: resID, name offset,
+1-byte attributes, 3-byte data offset relative to the data section,
+4-byte handle placeholder).
+
+Confirmed resource layouts (all offsets from the start of the
+resource's own data, after its 4-byte length prefix):
+
+| Type | Layout |
+|---|---|
+| `WIND` | boundsRect (4 shorts: top,left,bottom,right), procID (short), visible (short, nonzero=true), goAwayFlag (short), refCon (long), title (pstr), optional trailing positioning word (ignored) |
+| `MENU` | menuID (short), width/height (shorts, ignored), a 4-byte menuProc placeholder (ignored), enableFlags (long, bit *N* = item *N*), title (pstr), then items until a zero-length title: itemTitle (pstr), icon/cmdKey/mark/style (1 byte each) |
+| `DLOG` | same as `WIND` through refCon, then itemsID (short), title (pstr), optional positioning word |
+| `DITL` | itemCount-1 (short), then per item: 4-byte placeholder, itemRect (4 shorts), type byte (0x80 bit = disabled, low 7 bits = type: 4=button, 5=checkbox, 6=radio, 8=statText, 16=editText — icon/control/picture/userItem not supported, silently skipped), 1-byte data length, that many data bytes, +1 pad byte if the data length is odd |
+| `ALRT` | boundsRect (4 shorts), itemsID (short), a 2-byte "stages" word (per-click sound/redraw hints — ignored), optional positioning word |
+
+One alignment subtlety: a title Pascal string immediately followed by
+another field (the positioning word in `WIND`/`DLOG`) gets a padding
+byte inserted when the *total* `1 + titleLen` is odd — confirmed by
+comparing two real compiles, one with an odd-length title (no padding
+needed) and one with an empty title (padding needed). `DITL` item data
+is word-aligned the same way, though the specific items compiled
+during bring-up happened to both be even-length, so that path is
+implemented per Inside Mac's documented convention rather than having
+been directly exercised.
+
+**Modern Rez encodes string literals as UTF-8, not Mac Roman** —
+confirmed: a menu item containing "…" compiled to the 3-byte UTF-8
+sequence, not the 1-byte Mac Roman 0xC9. `RM_MacRomanPStringToUTF8`
+(used throughout to render resource-sourced Pascal strings) assumes
+Mac Roman, so any non-ASCII byte in a resource's text will render as
+mojibake — ASCII-only text round-trips fine, since ASCII is a subset of
+both encodings. `rezdemo.r` sticks to plain ASCII (`"..."` instead of
+`"…"`) to sidestep this in its own acceptance test; a real fix would
+mean either re-encoding resource strings from UTF-8 at load time or
+teaching the renderer to detect which encoding a given string is in —
+left as a known limitation rather than fixed, since no sample app here
+needs non-ASCII resource text.
+
+**Verified**: built `rezdemo.app` with `retromacc rezdemo.c rezdemo.r
+-o RezDemo.app`, confirmed `Contents/Resources/Resources.rsrc` exists,
+launched, and drove it with real clicks/keystrokes: the main window
+appeared at exactly the `RM_DISPLAY_SCALE`-scaled position/size the
+`WIND` resource specified with the right title and body text; both
+`MENU`-loaded menus appeared correctly (including the Cmd-Q
+equivalent); the `DLOG`+`DITL` dialog rendered its statText and both
+buttons correctly positioned from the resource; Return resolved to the
+real DITL-order default item (item 1, OK) and dismissed it; the
+resulting `NoteAlert` — looked up by ID, falling through to its own
+`ALRT`'s `itemsID` → `DITL` 129 — showed the exact message text passed
+to `ParamText` substituted for `^0`. Also rebuilt `wordle.app`/
+`demo.app`/`dialogdemo.app` (no `.r` files passed) to confirm zero
+regression for apps with no resources.

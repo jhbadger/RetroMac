@@ -3,13 +3,21 @@
 # RetroMac runtime and packages the result as a double-clickable
 # modern macOS .app bundle.
 #
-# Usage: retromacc <source.c> [<source.c> ...] -o <AppName>[.app]
+# Usage: retromacc <source.c> [<source.c> ...] [<resource.r> ...] -o <AppName>[.app]
+#
+# .r files are compiled as resources (Phase 2, see Toolbox.md) --
+# listed explicitly, not auto-detected by matching basename against a
+# .c file. That matters: this repo has a stale, unrelated demo.r left
+# over from before RetroMac existed, which happens to share demo.c's
+# basename purely by naming coincidence -- auto-detecting it would
+# silently (and wrongly) try to compile it into demo.app's resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RETROMAC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SOURCES=()
+RSRC_SOURCES=()
 OUT_NAME=""
 
 while [[ $# -gt 0 ]]; do
@@ -19,8 +27,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "usage: retromacc <source.c> [more.c ...] -o <AppName>"
+            echo "usage: retromacc <source.c> [more.c ...] [resource.r ...] -o <AppName>"
             exit 0
+            ;;
+        *.r)
+            RSRC_SOURCES+=("$1")
+            shift
             ;;
         *)
             SOURCES+=("$1")
@@ -30,7 +42,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#SOURCES[@]} -eq 0 || -z "$OUT_NAME" ]]; then
-    echo "usage: retromacc <source.c> [more.c ...] -o <AppName>" >&2
+    echo "usage: retromacc <source.c> [more.c ...] [resource.r ...] -o <AppName>" >&2
     exit 1
 fi
 
@@ -55,6 +67,7 @@ RUNTIME_SOURCES=(
     "$RETROMAC_ROOT/src/MiscManagers.c"
     "$RETROMAC_ROOT/src/TextEditManager.c"
     "$RETROMAC_ROOT/src/DialogManager.c"
+    "$RETROMAC_ROOT/src/ResourceManager.c"
     "$RETROMAC_ROOT/src/CocoaBridge.m"
     "$RETROMAC_ROOT/src/AppShell.m"
 )
@@ -89,6 +102,27 @@ mkdir -p "$MACOS_DIR"
 clang -fobjc-arc "${OBJS[@]}" \
     -framework Cocoa -framework CoreText -framework CoreGraphics \
     -o "$MACOS_DIR/$BIN_NAME"
+
+# Phase 2: any .r files passed on the command line are compiled with
+# the real system Rez (present via Xcode or just the Command Line
+# Tools -- `xcrun` finds whichever is active) into a flat, single-file
+# resource blob (`-useDF`: no HFS+ resource-fork/xattr involved) and
+# embedded as Contents/Resources/Resources.rsrc, which AppShell.m loads
+# at boot. No .r file passed -- as with every Phase 0/1 sample -- and
+# this whole block is skipped entirely.
+if [[ ${#RSRC_SOURCES[@]} -gt 0 ]]; then
+    SDK_PATH="$(xcrun --show-sdk-path)"
+    REZ_INCLUDES=(
+        -i "$RETROMAC_ROOT/rez"
+        -i "$SDK_PATH/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/Headers"
+        -i "$SDK_PATH/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/Headers"
+        -i "$SDK_PATH/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/Headers"
+    )
+    RESOURCES_DIR="$CONTENTS_DIR/Resources"
+    mkdir -p "$RESOURCES_DIR"
+    echo "compiling resources: ${RSRC_SOURCES[*]}"
+    Rez "${REZ_INCLUDES[@]}" -useDF -o "$RESOURCES_DIR/Resources.rsrc" "${RSRC_SOURCES[@]}"
+fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

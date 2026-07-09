@@ -109,6 +109,13 @@ void RM_MenuItemChosen(short menuID, short itemIndex1Based);
  * MenuSelect call chain expects instead of trying to catch a real one. */
 int RM_HasPendingMenuSelection(void);
 
+/* Implemented in ResourceManager.c; called once from AppShell.m (after
+ * RMCocoa_Init, before RetroMacUserMain) with the .app bundle's
+ * Contents/Resources/Resources.rsrc path. Silent no-op if the path
+ * doesn't exist -- apps with no sibling .r file (every Phase 0/1
+ * sample) are completely unaffected. */
+void RM_LoadAppResourceFile(const char *path);
+
 /* The classic app's real main(), renamed to this by retromacc's
  * -Dmain=RetroMacUserMain so AppShell.m can own the real process
  * main() and boot Cocoa first. */

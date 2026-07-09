@@ -16,6 +16,13 @@ int main(int argc, const char *argv[])
     (void)argv;
     @autoreleasepool {
         RMCocoa_Init();
+
+        /* Phase 2: retromacc embeds a sibling .r file's compiled output
+         * (if any) as Contents/Resources/Resources.rsrc. Silent no-op
+         * if it doesn't exist -- every app with no .r file (all of
+         * Phase 0/1's samples) is unaffected. */
+        NSString *rsrcPath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"Resources.rsrc"];
+        RM_LoadAppResourceFile(rsrcPath.UTF8String);
     }
     return RetroMacUserMain();
 }
