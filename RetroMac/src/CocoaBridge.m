@@ -49,12 +49,19 @@
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
     int hasTitleBar = RM_WindowHasTitleBar(w);
     int hasGoAway   = RM_WindowHasGoAway(w);
-    int width       = RM_WindowWidth(w);
-    int height      = RM_WindowHeight(w);
-    int titleBarH   = hasTitleBar ? RM_TITLEBAR_HEIGHT : 0;
+    /* RM_WindowWidth/Height report classic (unscaled) units -- this
+     * view itself was sized at RM_DISPLAY_SCALE times that (see
+     * RMCocoa_CreateWindow), so all native-view-space chrome geometry
+     * here needs the same scale-up. The offscreen `buffer` blitted
+     * below is already RM_DISPLAY_SCALE-times-classic pixels natively
+     * (WindowManager.c's NewWindow), so its destination rect below
+     * needs the same scaled width/height for a crisp 1:1 blit. */
+    int width       = RM_WindowWidth(w) * RM_DISPLAY_SCALE;
+    int height      = RM_WindowHeight(w) * RM_DISPLAY_SCALE;
+    int titleBarH   = hasTitleBar ? RM_TITLEBAR_HEIGHT * RM_DISPLAY_SCALE : 0;
 
     if (hasTitleBar) {
-        NSRect bar = NSMakeRect(0, 0, width, RM_TITLEBAR_HEIGHT);
+        NSRect bar = NSMakeRect(0, 0, width, titleBarH);
         [[NSColor colorWithWhite:0.85 alpha:1.0] setFill];
         NSRectFill(bar);
 
@@ -62,15 +69,16 @@
         RM_WindowTitleUTF8(w, titleUTF8, sizeof(titleUTF8));
         NSString *titleStr = [NSString stringWithUTF8String:titleUTF8];
         NSDictionary *attrs = @{
-            NSFontAttributeName: [NSFont boldSystemFontOfSize:12],
+            NSFontAttributeName: [NSFont boldSystemFontOfSize:12 * RM_DISPLAY_SCALE],
             NSForegroundColorAttributeName: [NSColor blackColor]
         };
         NSSize sz = [titleStr sizeWithAttributes:attrs];
-        NSPoint p = NSMakePoint((width - sz.width) / 2.0, (RM_TITLEBAR_HEIGHT - sz.height) / 2.0);
+        NSPoint p = NSMakePoint((width - sz.width) / 2.0, (titleBarH - sz.height) / 2.0);
         [titleStr drawAtPoint:p withAttributes:attrs];
 
         if (hasGoAway) {
-            NSRect box = NSMakeRect(6, (RM_TITLEBAR_HEIGHT - 12) / 2.0, 12, 12);
+            CGFloat boxSide = 12 * RM_DISPLAY_SCALE;
+            NSRect box = NSMakeRect(6 * RM_DISPLAY_SCALE, (titleBarH - boxSide) / 2.0, boxSide, boxSide);
             [[NSColor whiteColor] setFill];
             NSRectFill(box);
             [[NSColor blackColor] setStroke];
@@ -131,8 +139,8 @@ static double MainScreenHeight(void)
 static Point ClassicPointFromScreenPoint(NSPoint p)
 {
     Point pt;
-    pt.h = (short)p.x;
-    pt.v = (short)(MainScreenHeight() - p.y);
+    pt.h = (short)(p.x / RM_DISPLAY_SCALE);
+    pt.v = (short)((MainScreenHeight() - p.y) / RM_DISPLAY_SCALE);
     return pt;
 }
 
@@ -164,8 +172,12 @@ Rect RMCocoa_MainScreenBoundsClassic(void)
     Rect r;
     r.top = 0;
     r.left = 0;
-    r.right = (short)f.size.width;
-    r.bottom = (short)f.size.height;
+    /* Reported in classic units -- RM_DISPLAY_SCALE smaller than the
+     * real screen -- so apps centering a window against qd.screenBits.
+     * bounds land correctly once RMCocoa_CreateWindow scales their
+     * result back up. */
+    r.right = (short)(f.size.width / RM_DISPLAY_SCALE);
+    r.bottom = (short)(f.size.height / RM_DISPLAY_SCALE);
     return r;
 }
 
@@ -177,10 +189,15 @@ void *RMCocoa_CreateWindow(Rect contentBoundsGlobal, int hasTitleBar, void *owne
     if (height < 1) height = 1;
     int titleBarH = hasTitleBar ? RM_TITLEBAR_HEIGHT : 0;
 
+    /* contentBoundsGlobal/width/height/titleBarH are all classic
+     * units; the real on-screen frame is RM_DISPLAY_SCALE times
+     * bigger in both position and size, uniformly, so the classic
+     * app's own placement math (e.g. NewWindow bounds literals) scales
+     * along with everything else -- see RetroMacBridge.h. */
     double screenH = MainScreenHeight();
-    NSRect frame = NSMakeRect(contentBoundsGlobal.left,
-                              screenH - contentBoundsGlobal.top - titleBarH - height,
-                              width, height + titleBarH);
+    NSRect frame = NSMakeRect(contentBoundsGlobal.left * RM_DISPLAY_SCALE,
+                              screenH - (contentBoundsGlobal.top + titleBarH + height) * RM_DISPLAY_SCALE,
+                              width * RM_DISPLAY_SCALE, (height + titleBarH) * RM_DISPLAY_SCALE);
 
     RMWindow *win = [[RMWindow alloc] initWithContentRect:frame
                                                   styleMask:NSWindowStyleMaskBorderless
@@ -191,7 +208,8 @@ void *RMCocoa_CreateWindow(Rect contentBoundsGlobal, int hasTitleBar, void *owne
     win.backgroundColor = [NSColor whiteColor];
     win.releasedWhenClosed = NO;
 
-    RMContentView *view = [[RMContentView alloc] initWithFrame:NSMakeRect(0, 0, width, height + titleBarH)];
+    RMContentView *view = [[RMContentView alloc] initWithFrame:NSMakeRect(0, 0, width * RM_DISPLAY_SCALE,
+                                                                           (height + titleBarH) * RM_DISPLAY_SCALE)];
     view.grafPort = ownerGrafPort;
     win.contentView = view;
 
@@ -239,9 +257,13 @@ Point RMCocoa_WindowContentOriginClassic(void *nsWindowRef, int hasTitleBar)
     NSWindow *win = (__bridge NSWindow *)nsWindowRef;
     NSRect f = win.frame;
     double screenH = MainScreenHeight();
-    (void)hasTitleBar; /* frame already includes the titlebar strip we drew */
-    pt.h = (short)f.origin.x;
-    pt.v = (short)(screenH - f.origin.y - f.size.height);
+    /* contentOriginGlobal (what this feeds) is documented as the
+     * CONTENT area's top-left -- f.size.height is the whole frame
+     * (content + titlebar), so the titlebar strip has to be added back
+     * to land on the content top, not the structure top. */
+    double titleBarHReal = hasTitleBar ? RM_TITLEBAR_HEIGHT * RM_DISPLAY_SCALE : 0;
+    pt.h = (short)(f.origin.x / RM_DISPLAY_SCALE);
+    pt.v = (short)((screenH - f.origin.y - f.size.height + titleBarHReal) / RM_DISPLAY_SCALE);
     return pt;
 }
 
@@ -250,8 +272,12 @@ void RMCocoa_MoveWindowByScreenDelta(void *nsWindowRef, double dxScreen, double 
     if (!nsWindowRef) return;
     NSWindow *win = (__bridge NSWindow *)nsWindowRef;
     NSRect f = win.frame;
-    f.origin.x += dxScreen;
-    f.origin.y += dyScreen;
+    /* Despite the name, callers (WindowManager.c's DragWindow) compute
+     * this delta between two already-classic-unit points, so it has to
+     * be scaled back up to move the real (RM_DISPLAY_SCALE-times-bigger)
+     * NSWindow by the equivalent real distance. */
+    f.origin.x += dxScreen * RM_DISPLAY_SCALE;
+    f.origin.y += dyScreen * RM_DISPLAY_SCALE;
     [win setFrameOrigin:f.origin];
 }
 

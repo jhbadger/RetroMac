@@ -128,10 +128,20 @@ WindowPtr NewWindow(void *storage, const Rect *boundsRect, ConstStr255Param titl
     w->contentOriginGlobal.h = boundsRect->left;
     w->contentOriginGlobal.v = boundsRect->top;
 
+    /* The buffer's actual pixel dimensions are RM_DISPLAY_SCALE times
+     * the classic width/height, but every other file (QuickDraw.c,
+     * ControlManager.c, TextEditManager.c, DialogManager.c) keeps
+     * drawing in plain classic units against gCurrentPort->width/height
+     * -- pre-scaling the CTM here once, right at creation, is what
+     * transparently maps those classic-unit CGContext/Core Text calls
+     * onto the right physical pixel density, so none of them need to
+     * know RM_DISPLAY_SCALE exists. See RetroMacBridge.h. */
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    w->buffer = CGBitmapContextCreate(NULL, (size_t)width, (size_t)height, 8, 0, cs,
+    w->buffer = CGBitmapContextCreate(NULL, (size_t)(width * RM_DISPLAY_SCALE),
+                                       (size_t)(height * RM_DISPLAY_SCALE), 8, 0, cs,
                                        kCGImageAlphaPremultipliedLast);
     CGColorSpaceRelease(cs);
+    CGContextScaleCTM(w->buffer, RM_DISPLAY_SCALE, RM_DISPLAY_SCALE);
     CGContextSetRGBFillColor(w->buffer, 1, 1, 1, 1);
     CGContextFillRect(w->buffer, CGRectMake(0, 0, width, height));
 

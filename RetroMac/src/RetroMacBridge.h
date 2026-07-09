@@ -31,6 +31,24 @@ extern "C" {
 #define RM_TITLEBAR_HEIGHT 20
 #define RM_MENUBAR_HEIGHT  20
 
+/* Uniform "everything is bigger on modern screens" scale factor: the
+ * entire classic coordinate universe (screen bounds, window
+ * positions/sizes, mouse points) is a factor of RM_DISPLAY_SCALE
+ * smaller than real screen points -- exactly like a Retina
+ * backingScaleFactor, applied at the same classic/native boundary
+ * this header exists to isolate. Classic app code and every plain-C
+ * Toolbox file (QuickDraw.c/ControlManager.c/TextEditManager.c/
+ * DialogManager.c) stay entirely unaware of it: they keep computing
+ * in ordinary classic units, and CocoaBridge.m converts at the edges
+ * (window frame creation, mouse point conversion) while WindowManager.c's
+ * NewWindow pre-scales each window's offscreen CGContext's CTM once at
+ * creation so ordinary classic-unit CGContext/Core Text drawing calls
+ * land at the right physical pixel density automatically -- see
+ * Toolbox.md section 11 for why this needed no changes at all to the
+ * actual drawing code in QuickDraw.c/ControlManager.c/TextEditManager.c/
+ * DialogManager.c. */
+#define RM_DISPLAY_SCALE 2
+
 /* ==== C (Toolbox logic) calling into Objective-C (CocoaBridge.m) ==== */
 
 void RMCocoa_Init(void); /* NSApplication bootstrap; called once from AppShell.m */

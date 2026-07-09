@@ -8,10 +8,14 @@
 > actual clicks/keystrokes, not just a clean compile. Phase 1 adds a
 > real Dialog Manager (`NewDialog`/`ModalDialog`/`Alert` family) and
 > TextEdit (`TENew`/`TEClick`/`TEKey`); `dialogdemo.c` is its
-> acceptance test, confirmed the same way. The component map in §3 and
-> the build-wrapper description in §6 describe what was actually built
-> (which diverged from the original plan in a few places); see §10 for
-> Phase 0's bring-up notes and §11 for Phase 1's.
+> acceptance test, confirmed the same way. `DragWindow` (previously
+> only reviewed by inspection) and a 2× display scale (§5) are also now
+> confirmed working, including fixing a real `DragWindow` bug the
+> scaling work surfaced. The component map in §3 and the build-wrapper
+> description in §6 describe what was actually built (which diverged
+> from the original plan in a few places); see §10 for Phase 0's
+> bring-up notes, §11 for Phase 1's, and §12 for the display-scale
+> notes.
 
 ## 1. Goal
 
@@ -199,6 +203,27 @@ one.
   `wordle.c`'s centering via `StringWidth`) still centers correctly.
 - Colors: `RGBColor` (`unsigned short r,g,b`, 0–0xFFFF range) convert
   to `CGColor` by dividing by 65535.0.
+- **Display scale** (`RM_DISPLAY_SCALE`, `RetroMacBridge.h`, default
+  2): classic UI conventions (12pt system font, a 20px title bar) are
+  tiny on a modern high-resolution, physically-large display, so the
+  whole classic coordinate universe — screen bounds, window positions/
+  sizes, mouse points — is uniformly `RM_DISPLAY_SCALE` smaller than
+  real screen points, exactly like a Retina `backingScaleFactor`. The
+  entire feature is confined to the classic/native boundary that
+  already existed for other reasons: `WindowManager.c`'s `NewWindow`
+  creates each window's offscreen `CGContext` at
+  `RM_DISPLAY_SCALE`-times-classic pixel dimensions and pre-scales its
+  CTM once (`CGContextScaleCTM`) right at creation, and `CocoaBridge.m`
+  scales window frame creation, the hand-drawn title bar/close box, and
+  every real-screen-point-to-classic-`Point` conversion
+  (`ClassicPointFromScreenPoint` and friends). Because the CTM is
+  pre-scaled, ordinary classic-unit `CGContext`/Core Text drawing calls
+  in `QuickDraw.c`/`ControlManager.c`/`TextEditManager.c`/
+  `DialogManager.c` land at the right physical pixel density
+  automatically — **none of those files needed any changes at all**,
+  and classic app sources (`wordle.c`/`demo.c`/`dialogdemo.c`) are
+  completely unaware the scale exists. See §12 for what this actually
+  touched and a pre-existing bug it surfaced.
 
 ## 6. Build wrapper (`retromacc`)
 
@@ -429,3 +454,45 @@ known screen position instead, since RetroMac's borderless windows
 still don't expose an `AXWindow` surface. Worth reaching for `cliclick`
 first, rather than fighting accessibility APIs, for any future
 interactive verification of window content.
+
+## 12. Display-scale bring-up notes
+
+**A pre-existing bug in `DragWindow` surfaced while touching this
+code.** `RMCocoa_WindowContentOriginClassic` (re-derives
+`contentOriginGlobal` after a drag) computed the *structure* top
+(`screenH - f.origin.y - f.size.height`, i.e. the top of the title bar)
+and stored it as if it were the *content* top, which
+`WindowManager.c`'s `FindWindow` subtracts `RM_TITLEBAR_HEIGHT` from to
+get the structure top back out — a `RM_TITLEBAR_HEIGHT`-pixel error for
+any `documentProc` window (one with a title bar) after being dragged.
+Invisible for `dBoxProc` dialogs (title bar height 0, so the bug term
+vanished), which is exactly why Phase 0's About-box-only interactive
+testing never would have caught it. Fixed by adding the title bar
+height back before returning. This is likely what §10 was actually
+hedging about when it flagged `DragWindow`/`TrackGoAway` as "reviewed
+by inspection" rather than screenshot-confirmed — dragging a
+`documentProc` window was never actually exercised.
+
+**The uniform-scale model (same classic coordinates, everything
+`RM_DISPLAY_SCALE` bigger in real screen points) turned out simpler
+than an earlier "magnify window content in place, keep its screen
+position fixed" framing.** The latter would have made the classic-to-
+real mapping depend on which window (if any) a click landed in,
+requiring hit-testing in real screen space *before* any classic-space
+conversion — a real restructuring of the mouse-event pipeline. Scaling
+window *position* along with size, uniformly, keeps the existing
+"convert real point to classic point, then hit-test in classic space"
+pipeline (`ClassicPointFromScreenPoint` → `FindWindow`) completely
+intact; only the conversion functions themselves needed the scale
+factor, not their calling order.
+
+**Verified**: built `demo.app`/`dialogdemo.app`/`wordle.app`, confirmed
+via `System Events` that window position and size both come out to
+exactly `RM_DISPLAY_SCALE` × the classic values (e.g. a window placed
+at classic `(60,60)` sized `400×280` reported real position `(120,120)`
+size `800×560`), confirmed text renders crisp at the larger size
+(genuine higher-resolution Core Text rendering via the pre-scaled CTM,
+not a blurry upscaled blit), and confirmed a real click on the About
+dialog's (now 2×-sized) OK button correctly dismissed it — proving the
+coordinate conversion is correct in both directions, not just for
+window placement.
