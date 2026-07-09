@@ -407,19 +407,12 @@ just idles harmlessly instead of pegging a core.
   convention, not a bug in the byte-0x14-sentinel handling (which
   correctly identifies the Apple menu internally; it just can't win
   the display-title fight for slot 0).
-- Window dragging (`DragWindow`) and the close box (`TrackGoAway`)
+- ~~Window dragging (`DragWindow`) and the close box (`TrackGoAway`)
   are implemented with the same `RMCocoa_TrackMouse` primitive already
-  proven live for `TrackControl`'s button-press tracking, and reviewed
-  by inspection, but weren't independently screenshot-confirmed in a
-  dedicated interactive test the way window rendering, keyboard input,
-  game logic, the menu bar, and the About dialog were — AppleScript UI
-  scripting can't reliably hit-test RetroMac's borderless,
-  accessibility-invisible windows by position for this specific
-  gesture (menu bar items live in a separate, reliably-queryable
-  accessibility tree; window content does not, since `NSWindow`
-  instances with `NSWindowStyleMaskBorderless` don't expose the same
-  `AXWindow` surface a titled window would). Worth a manual click-test
-  pass before relying on it.
+  proven live for `TrackControl`'s button-press tracking... worth a
+  manual click-test pass before relying on it.~~ **This hedge was
+  correct to be suspicious, and it turned out to hide a real bug, not
+  just an untested-but-fine code path** — see §12.
 
 ## 11. Phase 1 bring-up notes
 
@@ -457,21 +450,42 @@ interactive verification of window content.
 
 ## 12. Display-scale bring-up notes
 
-**A pre-existing bug in `DragWindow` surfaced while touching this
-code.** `RMCocoa_WindowContentOriginClassic` (re-derives
-`contentOriginGlobal` after a drag) computed the *structure* top
-(`screenH - f.origin.y - f.size.height`, i.e. the top of the title bar)
-and stored it as if it were the *content* top, which
-`WindowManager.c`'s `FindWindow` subtracts `RM_TITLEBAR_HEIGHT` from to
-get the structure top back out — a `RM_TITLEBAR_HEIGHT`-pixel error for
-any `documentProc` window (one with a title bar) after being dragged.
-Invisible for `dBoxProc` dialogs (title bar height 0, so the bug term
-vanished), which is exactly why Phase 0's About-box-only interactive
-testing never would have caught it. Fixed by adding the title bar
-height back before returning. This is likely what §10 was actually
-hedging about when it flagged `DragWindow`/`TrackGoAway` as "reviewed
-by inspection" rather than screenshot-confirmed — dragging a
-`documentProc` window was never actually exercised.
+**`DragWindow` was actually broken since Phase 0 — not just
+unconfirmed — and it took a real user report to catch it.** While
+adding the scale factor, `RMCocoa_WindowContentOriginClassic` (re-
+derives `contentOriginGlobal` after a drag) was updated defensively to
+add the title bar height back in, on the theory that it had been
+returning the *structure* top instead of the *content* top. That
+theory was correct, but fixing that one function wasn't the actual
+bug, and an initial pass at this section claimed dragging was
+"confirmed working" based on that fix plus unrelated content-area
+click tests (an About box's OK button, a menu command) — it was not
+actually re-tested. When the user reported windows still couldn't be
+moved, direct instrumentation (temporary `fprintf`s in `DragWindow`/
+`RMCocoa_TrackMouse`) plus a from-scratch coordinate re-derivation
+found the real bug: **`RMCocoa_CreateWindow`'s frame-origin formula
+had a duplicated `titleBarH` term**
+(`screenH - (contentBoundsGlobal.top + titleBarH + height) * SCALE`),
+which places the window's on-screen structural top exactly at
+`contentBoundsGlobal.top` instead of `titleBarH` pixels *above* it.
+That renders every `documentProc` window's content (and its title bar)
+`titleBarH` pixels lower on screen than `FindWindow`'s hit-testing
+model (`structTop = contentOriginGlobal.v - titleBarH`) expects — so a
+real click anywhere on the *visible* title bar always fails
+`FindWindow`'s `pt.v < contentOriginGlobal.v` test and gets classified
+as `inContent` instead of `inDrag`/`inGoAway`. The close box was
+equally broken by the same root cause, for the same reason. Invisible
+in Phase 0's own interactive testing because that testing only ever
+drove `dBoxProc` About boxes (title bar height 0, so the duplicated
+term is zero and the bug vanishes) — exactly what §10's own hedge
+("worth a manual click-test pass before relying on it") was
+unknowingly flagging. Fixed by removing the duplicated term
+(`screenH - (contentBoundsGlobal.top + height) * SCALE`); confirmed via
+a clean launch reporting the window at exactly the position the
+corrected formula predicts, and by the user's own drag test afterward.
+Lesson: a plausible-sounding fix for a *related* function is not the
+same as re-testing the actual reported symptom — should have re-driven
+an actual drag before saying so.
 
 **The uniform-scale model (same classic coordinates, everything
 `RM_DISPLAY_SCALE` bigger in real screen points) turned out simpler
@@ -486,13 +500,17 @@ pipeline (`ClassicPointFromScreenPoint` → `FindWindow`) completely
 intact; only the conversion functions themselves needed the scale
 factor, not their calling order.
 
-**Verified**: built `demo.app`/`dialogdemo.app`/`wordle.app`, confirmed
-via `System Events` that window position and size both come out to
-exactly `RM_DISPLAY_SCALE` × the classic values (e.g. a window placed
-at classic `(60,60)` sized `400×280` reported real position `(120,120)`
-size `800×560`), confirmed text renders crisp at the larger size
-(genuine higher-resolution Core Text rendering via the pre-scaled CTM,
-not a blurry upscaled blit), and confirmed a real click on the About
-dialog's (now 2×-sized) OK button correctly dismissed it — proving the
-coordinate conversion is correct in both directions, not just for
-window placement.
+**Verified** (after the `RMCocoa_CreateWindow` fix above): built
+`demo.app`/`dialogdemo.app`/`wordle.app`. A `documentProc` window
+placed at classic content-top `(60,60)`, size `400×260` (title bar
+height 20) now reports its real on-screen frame at exactly
+`(120,80)`/`800×560` — i.e. `RM_DISPLAY_SCALE` × `(60,60-20)`/`(400,280)`,
+matching the corrected formula's prediction exactly, not the
+`(120,120)` an earlier (buggy) build reported. Text renders crisp at
+the larger size (genuine higher-resolution Core Text rendering via the
+pre-scaled CTM, not a blurry upscaled blit). A real click on the About
+dialog's (now 2×-sized) OK button correctly dismissed it, and — the
+actual regression this section exists to document — dragging a
+`documentProc` window by its visible title bar, and clicking its
+visible close box, both now work, confirmed by the user directly
+rather than by automated screenshot alone.

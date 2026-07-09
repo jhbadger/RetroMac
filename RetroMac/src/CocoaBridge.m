@@ -193,10 +193,24 @@ void *RMCocoa_CreateWindow(Rect contentBoundsGlobal, int hasTitleBar, void *owne
      * units; the real on-screen frame is RM_DISPLAY_SCALE times
      * bigger in both position and size, uniformly, so the classic
      * app's own placement math (e.g. NewWindow bounds literals) scales
-     * along with everything else -- see RetroMacBridge.h. */
+     * along with everything else -- see RetroMacBridge.h.
+     *
+     * contentBoundsGlobal.top is the CONTENT top (WindowManager.c's
+     * contentOriginGlobal, per NewWindow), and the title bar sits
+     * ABOVE that -- so the frame's structural top has to be placed at
+     * (contentBoundsGlobal.top - titleBarH), not at contentBoundsGlobal.top
+     * itself. Do not add titleBarH again here (on top of it already
+     * being folded into frame.size.height below) -- that was a real
+     * bug: it pushed the whole frame titleBarH-classic-units further
+     * down the screen than FindWindow's hit-testing model (which does
+     * expect the content to start exactly at contentBoundsGlobal.top)
+     * assumes, so a real click on the visible title bar always fell
+     * outside the pt.v < contentOriginGlobal.v test and got
+     * classified as inContent instead of inDrag/inGoAway -- see
+     * Toolbox.md section 12. */
     double screenH = MainScreenHeight();
     NSRect frame = NSMakeRect(contentBoundsGlobal.left * RM_DISPLAY_SCALE,
-                              screenH - (contentBoundsGlobal.top + titleBarH + height) * RM_DISPLAY_SCALE,
+                              screenH - (contentBoundsGlobal.top + height) * RM_DISPLAY_SCALE,
                               width * RM_DISPLAY_SCALE, (height + titleBarH) * RM_DISPLAY_SCALE);
 
     RMWindow *win = [[RMWindow alloc] initWithContentRect:frame
